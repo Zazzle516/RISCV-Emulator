@@ -36,7 +36,7 @@
             "program": "${workspaceFolder}/build/Debug/riscv_sim.exe",
             "args": ["-u"],
             "stopAtEntry": false,
-            "cwd": "${workspaceFolder}/../../test",
+            "cwd": "${workspaceFolder}/../../test",     // 该配置项声明了目前的调式路径 所以在向 Flash 导入 image.bin 的时候相对路径要根据这个来
             "environment": [],
             "console": "integratedTerminal"
         }

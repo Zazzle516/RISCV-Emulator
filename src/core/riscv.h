@@ -23,8 +23,12 @@ riscv_t* riscv_create(void);
 /* 创建 Flash 外设对应的结构体 */
 // Q: 此时的这个 Flash 是什么状态 已经写入对应的 bin 文件了吗
 
-// Q: 为什么单独为 Flash 写一个函数 因为后续要根据参数动态分配空间
+// Q: 为什么单独为 Flash 写一个函数
+// A: 因为后续要根据参数动态分配空间
 void riscv_flash_set(riscv_t* riscv, mem_t* flash);     // 注意没有返回值并且需要声明该 flash 需要挂载到哪个模拟器对象上
+
+// 向该 flash->mem 空间中写入 image.bin 文件
+void flash_load_bin(riscv_t* riscv, const char* file_name);
 
 
 /* 定义针对 Reg 的读写操作 注意读写操作一定要写在 riscv_t 结构体的声明后面 否则编译器无法识别 */
