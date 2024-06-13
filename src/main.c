@@ -1,5 +1,6 @@
 ﻿#include <string.h>
 #include "plat/plat.h"
+#include <stdio.h>
 
 // 注意，如果包含了instr_test.h，就不要再包含test.h，要去掉，不然可能有冲突
 // #include "test.h"
@@ -29,5 +30,8 @@ int main(int argc, char** argv) {
     // 读取 image.bin 文件到 Flash 空间
     flash_load_bin(myRiscv, "./unit/ebreak/obj/image.bin");
 
+    riscv_reset(myRiscv);
+
+    fprintf(stdout, "myRiscv has reset with pc = %d", myRiscv->pc);
     return 0;
 }

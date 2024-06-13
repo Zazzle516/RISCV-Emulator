@@ -49,3 +49,11 @@ void flash_load_bin(riscv_t* riscv, const char* file_name) {
     // 记得关闭
     fclose(file);
 }
+
+// 重置芯片状态
+void riscv_reset(riscv_t* riscv) {
+    riscv->pc = 0;      // 因为 main.c 中定义的 RISCV_FLASH_START 是从 0 开始
+    memset(riscv->regs, 0, sizeof(riscv->regs));
+
+    // 并没有重置 Flash 和 RAM
+}

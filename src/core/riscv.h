@@ -21,7 +21,6 @@ typedef struct _riscv_t
 riscv_t* riscv_create(void);
 
 /* 创建 Flash 外设对应的结构体 */
-// Q: 此时的这个 Flash 是什么状态 已经写入对应的 bin 文件了吗
 
 // Q: 为什么单独为 Flash 写一个函数
 // A: 因为后续要根据参数动态分配空间
@@ -34,6 +33,7 @@ void flash_load_bin(riscv_t* riscv, const char* file_name);
 /* 定义针对 Reg 的读写操作 注意读写操作一定要写在 riscv_t 结构体的声明后面 否则编译器无法识别 */
 
 // 读操作: 根据模拟器对象 + reg 编号    这里用内联函数去写
+// 更推荐内联函数的方式 因为宏函数并不会对参数进行判断
 inline riscv_word_t riscv_read_regs(riscv_t* riscv, riscv_word_t reg) {
     return (riscv->regs[reg]);
 }
@@ -41,5 +41,8 @@ inline riscv_word_t riscv_read_regs(riscv_t* riscv, riscv_word_t reg) {
 // 写操作: 在模拟器层面 任何值都是二进制表示的 所以高级类型没有意义
 // 注意因为 RISCV 的 ISA 在 reg(0) 写入是没有意义的 所以进行一个判断
 #define riscv_write_reg (riscv, reg, val) (if (reg != 0) riscv->regs[reg] = val; )
+
+// 在写入 image.bin 文件后对芯片进行重置
+void riscv_reset(riscv_t* riscv);
 
 #endif /* RISCV_H */
