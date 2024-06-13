@@ -2,6 +2,7 @@
 #define INSTR_TEST_H
 
 #include "plat/plat.h"
+#include <stdio.h>
 
 #define PATH_PRE    "./unit/"
 
@@ -186,6 +187,7 @@ static void test_riscv_andi (riscv_t * riscv) {
 
     check_reg(riscv, reglist, 32);
 }
+
 static void test_riscv_slti (riscv_t * riscv) {
     riscv_load_bin(riscv, PATH_PRE"07_slti/obj/image.bin");
 
@@ -379,7 +381,6 @@ static void test_riscv_srl (riscv_t * riscv) {
 
     check_reg(riscv, reglist, 32);
 }
-
 
 static void test_riscv_sra (riscv_t * riscv) {
     riscv_load_bin(riscv, PATH_PRE"16_sra/obj/image.bin");

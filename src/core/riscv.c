@@ -16,7 +16,7 @@ void riscv_flash_set(riscv_t* riscv, mem_t* flash) {
 }
 
 // 读取 image.bin 文件
-void flash_load_bin(riscv_t* riscv, const char* file_name) {
+void riscv_load_bin(riscv_t* riscv, const char* file_name) {
     // 相对路径在 launch.json 文件定义的根路径中
     // 注意指定读取方式 以二进制 b 的形式读取
     FILE* file = fopen(file_name, "rb");
@@ -56,4 +56,16 @@ void riscv_reset(riscv_t* riscv) {
     memset(riscv->regs, 0, sizeof(riscv->regs));
 
     // 并没有重置 Flash 和 RAM
+
+    // 添加了指令结构体之后也重置指令
+    riscv->instr.raw = 0;
+}
+
+// 对应语法解决部分
+void riscv_continue(riscv_t* riscv, int step) {
+
+}
+
+int riscv_mem_read(riscv_t* riscv, riscv_word_t start_addr, uint8_t* val, int width){
+    return 0;
 }

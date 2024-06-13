@@ -1,6 +1,6 @@
 ﻿#include <string.h>
 #include "plat/plat.h"
-#include <stdio.h>
+// #include <stdio.h>
 
 // 注意，如果包含了instr_test.h，就不要再包含test.h，要去掉，不然可能有冲突
 // #include "test.h"
@@ -9,6 +9,7 @@
 
 #include "core/riscv.h"
 #include "device/mem.h"
+#include "test/instr_test.h"
 
 #define RISCV_FLASH_START               0                       // 现在很多芯片地址都是从零开始
 #define RISCV_FLASH_SIZE                (16 * 1024 * 1024)
@@ -28,10 +29,12 @@ int main(int argc, char** argv) {
     riscv_flash_set(myRiscv, myMemory);
 
     // 读取 image.bin 文件到 Flash 空间
-    flash_load_bin(myRiscv, "./unit/ebreak/obj/image.bin");
+    // flash_load_bin(myRiscv, "./unit/ebreak/obj/image.bin");
+    // riscv_reset(myRiscv);
+    // fprintf(stdout, "myRiscv has reset with pc = %d", myRiscv->pc);
 
-    riscv_reset(myRiscv);
+    // 代码框架实际给了完整的测试用例 可以不用自己手动写 直接调用 test/instr_test.h
+    instr_test(myRiscv);    // 会自己去调用 test_riscv_ebreak()
 
-    fprintf(stdout, "myRiscv has reset with pc = %d", myRiscv->pc);
     return 0;
 }
