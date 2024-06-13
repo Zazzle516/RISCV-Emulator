@@ -15,7 +15,7 @@
 static void run_to_ebreak (riscv_t * riscv) {
     while (1) {
         riscv_word_t pc = riscv->pc;
-        riscv_continue(riscv, 0);
+        riscv_continue(riscv, 1);
         if (riscv->instr.raw == EBREAK) {
             break;
         }

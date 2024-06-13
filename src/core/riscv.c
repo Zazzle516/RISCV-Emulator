@@ -61,11 +61,50 @@ void riscv_reset(riscv_t* riscv) {
     riscv->instr.raw = 0;
 }
 
-// 对应语法解决部分
-void riscv_continue(riscv_t* riscv, int step) {
+void riscv_continue(riscv_t* riscv, int forever) {
+    // 取指 riscv->pc; 
 
+    // 预处理: 获取指向 image.bin 空间的指针
+    // Q: 这个地方的强制类型转换是为什么    虽然它们的类型确实不一样    不能直接用 uin8_t* 接收吗
+    riscv_word_t* mem = (riscv_word_t*) riscv->riscv_flash->mem;
+    
+    // 对执行的指令进行判断
+    do
+    {
+        // 判断指令的地址合法性
+        if (riscv->pc < riscv->riscv_flash->riscv_dev.addr_start || riscv->pc > riscv->riscv_flash->riscv_dev.addr_end) {
+            fprintf(stderr, "Illegal Instruction Address\n");
+            return;
+        }
+
+        // 根据 pc 得到指令的具体内容   单个指令的单位长度为 4B    这里通过下标访问
+        riscv_word_t instruc = mem[(riscv->pc - riscv->riscv_flash->riscv_dev.addr_start) >> 2];
+        
+        // 也可以直接访问 pc
+        // riscv_word_t instruc = (riscv_word_t *) riscv->pc;   直接访问肯定不行 因为访问的是 0x0000 是本机的地址 一定会被 OS 阻止 所以一定要加上 mem 的首地址
+        // riscv_word_t instruc = (riscv_word_t *)(riscv->pc + mem);
+
+        // 把指令放到 IR 中
+        riscv->instr.raw = instruc;
+
+        switch (riscv->instr.opcode)
+        {
+        case OP_BREAK:
+            fprintf(stdout, "found ebreak!\n");
+            return;
+        
+        default:
+            fprintf(stdout, "normal instruction: %x\n", riscv->instr.raw);
+
+            // 更新 pc 指向
+            riscv->pc += sizeof(riscv_word_t);
+            break;
+        }
+    } while (forever);
+    
 }
 
+// 语法解决部分
 int riscv_mem_read(riscv_t* riscv, riscv_word_t start_addr, uint8_t* val, int width){
     return 0;
 }
