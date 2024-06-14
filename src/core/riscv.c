@@ -1,8 +1,9 @@
-#include "riscv.h"
 #include<stdlib.h>
 #include<assert.h>
 #include<stdio.h>
 #include<string.h>
+
+#include "riscv.h"
 
 riscv_t* riscv_create(void) {
     riscv_t* riscv = (riscv_t*)calloc(1, sizeof(riscv_t));    // 因为要求返回指针 所以分配一个空间就可以    32 + 32 + 32*32 / 144
@@ -61,6 +62,10 @@ void riscv_reset(riscv_t* riscv) {
     riscv->instr.raw = 0;
 }
 
+// 符号扩展: 把 12 位扩展到 20 位
+#define i_get_imm(instr)       \
+    ((int32_t)(instr.i.imm11_0 | ((instr.i.imm11_0 & (1 << 11)) ? (0xFFFFF << 12) : 0)))
+
 void riscv_continue(riscv_t* riscv, int forever) {
     // 取指 riscv->pc; 
 
@@ -92,8 +97,28 @@ void riscv_continue(riscv_t* riscv, int forever) {
         case OP_BREAK:
             fprintf(stdout, "found ebreak!\n");
             return;
-        
+
+        case OP_ADDI: {
+            switch (riscv->instr.i.funct3)
+            {
+            case FUNC3_ADDI: {
+                int32_t source = (int32_t)riscv_read_reg(riscv, riscv->instr.i.rs1);
+                int32_t imm = (int32_t)i_get_imm(riscv->instr);
+                int32_t result = imm + source;
+                riscv_write_reg(riscv, riscv->instr.i.rd, result);
+                
+                riscv->pc += sizeof(riscv_word_t);
+                break;
+            }
+
+            default:
+                goto cond_end;
+            }
+            break;
+        }
+
         default:
+            goto cond_end;
             fprintf(stdout, "normal instruction: %x\n", riscv->instr.raw);
 
             // 更新 pc 指向
@@ -101,7 +126,10 @@ void riscv_continue(riscv_t* riscv, int forever) {
             break;
         }
     } while (forever);
-    
+    return;
+
+cond_end:
+    fprintf(stderr, "Unable to recognize %x\n", riscv->instr.raw);
 }
 
 // 语法解决部分

@@ -44,7 +44,7 @@ inline riscv_word_t riscv_read_reg(riscv_t* riscv, riscv_word_t reg) {
 
 // 写操作: 在模拟器层面 任何值都是二进制表示的 所以高级类型没有意义
 // 注意因为 RISCV 的 ISA 在 reg(0) 写入是没有意义的 所以进行一个判断
-#define riscv_write_reg (riscv, reg, val) (if (reg != 0) riscv->regs[reg] = val; )
+#define riscv_write_reg(riscv, reg, val) if ((reg != 0) && (reg < 32)) {riscv->regs[reg] = val;}
 
 // 在写入 image.bin 文件后对芯片进行重置
 void riscv_reset(riscv_t* riscv);
