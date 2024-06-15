@@ -1,9 +1,8 @@
+#include "instr_implements.h"
 #include<stdlib.h>
 #include<assert.h>
 #include<stdio.h>
 #include<string.h>
-
-#include "riscv.h"
 
 riscv_t* riscv_create(void) {
     riscv_t* riscv = (riscv_t*)calloc(1, sizeof(riscv_t));    // 因为要求返回指针 所以分配一个空间就可以    32 + 32 + 32*32 / 144
@@ -62,10 +61,6 @@ void riscv_reset(riscv_t* riscv) {
     riscv->instr.raw = 0;
 }
 
-// 符号扩展: 把 12 位扩展到 32 位
-#define i_get_imm(instr)       \
-    ((int32_t)(instr.i.imm11_0 | ((instr.i.imm11_0 & (1 << 11)) ? (0xFFFFF << 12) : 0)))
-
 void riscv_continue(riscv_t* riscv, int forever) {
     // 取指 riscv->pc; 
 
@@ -99,40 +94,94 @@ void riscv_continue(riscv_t* riscv, int forever) {
             return;
 
         case OP_ADDI: {
-            switch (riscv->instr.i.funct3)
-            {
-            case FUNC3_ADDI: {
-                int32_t source = (int32_t)riscv_read_reg(riscv, riscv->instr.i.rs1);
-                int32_t imm = (int32_t)i_get_imm(riscv->instr);
-                int32_t result = imm + source;
-                riscv_write_reg(riscv, riscv->instr.i.rd, result);
-                
-                riscv->pc += sizeof(riscv_word_t);
-                break;
-            }
-            case FUNC3_ORI: {
-                int32_t source = (int32_t)riscv_read_reg(riscv, riscv->instr.i.rs1);
-                int32_t imm = (int32_t)i_get_imm(riscv->instr);
-                int32_t result = imm | source;
-                riscv_write_reg(riscv, riscv->instr.i.rd, result);
+            switch (riscv->instr.i.funct3){
+                case FUNC3_ADDI: {
+                    handle_addi(riscv);
+                    break;
+                }
+                case FUNC3_SLTI: {
+                    handle_slti(riscv);
+                    break;
+                }
+                case FUNC3_SLTIU: {
+                    handle_sltiu(riscv);
+                    break;
+                }
+                case FUNC3_XORI: {
+                    handle_xori(riscv);
+                    break;
+                }
+                case FUNC3_ORI: {
+                    handle_ori(riscv);
+                    break;
+                }
+                case FUNC3_ANDI: {
+                    handle_andi(riscv);
+                    break;
+                }
+                case FUNC3_SLLI: {
+                    handle_slli(riscv);
+                    break;
+                }
 
-                riscv->pc += sizeof(riscv_word_t);
-                break;
-            }
+                // 注意手册上 SRLI 和 SRAI 是两个指令 但是它们的 funct3 是相同的 所以用一条指令 SR 表示
+                case FUNC3_SR: {
+                    handle_srai_srli(riscv);
+                    break;
+                }
 
-            default:
-                goto cond_end;
+                default:
+                    goto cond_end;
             }
             break;
         }
 
+        case OP_ADD: {
+            switch (riscv->instr.r.funct3)
+            {
+                case FUNC3_ADD: {
+                    switch (riscv->instr.r.funct7)
+                    {
+                    case FUNC7_ADD:
+                        handle_add(riscv);
+                        break;
+                    case FUNC7_SUB:
+                        handle_sub(riscv);
+                        break;
+                    default:
+                        goto cond_end;
+                    }
+                    break;
+                }
+                case FUNC3_SLL:
+                    handle_sll(riscv);
+                    break;
+                case FUNC3_SLT:
+                    handle_slt(riscv);
+                    break;
+                case FUNC3_SLTU:
+                    handle_sltu(riscv);
+                    break;
+                case FUNC3_XOR:
+                    handle_xor(riscv);
+                    break;
+                case FUNC3_SR:
+                    handle_srl_sra(riscv);
+                    break;
+                case FUNC3_OR:
+                    handle_or(riscv);
+                    break;
+                case FUNC3_AND:
+                    handle_and(riscv);
+                    break;
+                default:
+                    goto cond_end;
+                }
+            break;
+        }
+        
         default:
             goto cond_end;
-            fprintf(stdout, "normal instruction: %x\n", riscv->instr.raw);
-
-            // 更新 pc 指向
-            riscv->pc += sizeof(riscv_word_t);
-            break;
         }
     } while (forever);
     return;
