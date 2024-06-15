@@ -62,7 +62,7 @@ void riscv_reset(riscv_t* riscv) {
     riscv->instr.raw = 0;
 }
 
-// 符号扩展: 把 12 位扩展到 20 位
+// 符号扩展: 把 12 位扩展到 32 位
 #define i_get_imm(instr)       \
     ((int32_t)(instr.i.imm11_0 | ((instr.i.imm11_0 & (1 << 11)) ? (0xFFFFF << 12) : 0)))
 
@@ -107,6 +107,15 @@ void riscv_continue(riscv_t* riscv, int forever) {
                 int32_t result = imm + source;
                 riscv_write_reg(riscv, riscv->instr.i.rd, result);
                 
+                riscv->pc += sizeof(riscv_word_t);
+                break;
+            }
+            case FUNC3_ORI: {
+                int32_t source = (int32_t)riscv_read_reg(riscv, riscv->instr.i.rs1);
+                int32_t imm = (int32_t)i_get_imm(riscv->instr);
+                int32_t result = imm | source;
+                riscv_write_reg(riscv, riscv->instr.i.rd, result);
+
                 riscv->pc += sizeof(riscv_word_t);
                 break;
             }

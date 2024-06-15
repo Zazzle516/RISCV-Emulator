@@ -118,14 +118,16 @@ typedef union _instr_t
         riscv_word_t other : 25;
     };
 
+    // 字节读取是有顺序的 目前看是小端序的
+
     // R-Type
     struct {
-        riscv_word_t funct7 : 7;
-        riscv_word_t rs2 : 5;
-        riscv_word_t rs1 : 5;
-        riscv_word_t funct3 : 3;
-        riscv_word_t rd : 5;
         riscv_word_t opcode : 7;
+        riscv_word_t rd : 5;
+        riscv_word_t funct3 : 3;
+        riscv_word_t rs1 : 5;
+        riscv_word_t rs2 : 5;
+        riscv_word_t funct7 : 7;
     } r;
 
     // I-Type
@@ -135,7 +137,7 @@ typedef union _instr_t
         // riscv_word_t funct3 : 3;
         // riscv_word_t rd : 5;
         // riscv_word_t opcode : 7;
-        
+
         riscv_word_t opcode : 7;
         riscv_word_t rd : 5;
         riscv_word_t funct3 : 3;
@@ -145,41 +147,41 @@ typedef union _instr_t
 
     // S-Type
     struct {
-        riscv_word_t imm11_5 : 7;
-        riscv_word_t rs2 : 5;
-        riscv_word_t rs1 : 5;
-        riscv_word_t funct3 : 3;
-        riscv_word_t imm4_0 : 5;
         riscv_word_t opcode : 7;
+        riscv_word_t imm4_0 : 5;
+        riscv_word_t funct3  : 3;
+        riscv_word_t rs1 : 5;
+        riscv_word_t rs2 : 5;
+        riscv_word_t imm11_5 : 7;
     } s;
 
     // B-Type
     struct {
-        riscv_word_t imm_12 : 1;
-        riscv_word_t imm_10_5 : 6;
-        riscv_word_t rs2 : 5;
-        riscv_word_t rs1 : 5;
-        riscv_word_t funct3 : 3;
-        riscv_word_t imm_4_1 : 4;
-        riscv_word_t imm_11 : 1;
         riscv_word_t opcode : 7;
+        riscv_word_t imm_11 : 1;
+        riscv_word_t imm_4_1 : 4;
+        riscv_word_t funct3 : 3;
+        riscv_word_t rs1 : 5;
+        riscv_word_t rs2 : 5;
+        riscv_word_t imm_10_5 : 6;
+        riscv_word_t imm_12 : 1;
     } b;
 
     // U-Type
     struct {
-        riscv_word_t imm31_12 : 20;
-        riscv_word_t rd : 5;
         riscv_word_t opcode : 7;
+        riscv_word_t rd  : 5;
+        riscv_word_t imm31_12 : 20;
     } u;
 
     // J-Type
     struct {
-        riscv_word_t imm_20 : 1;
-        riscv_word_t imm_10_1 : 10;
-        riscv_word_t imm_11 : 1;
-        riscv_word_t imm_19_12 : 8;
-        riscv_word_t rd : 5;
         riscv_word_t opcode : 7;
+        riscv_word_t rd : 5;
+        riscv_word_t imm_19_12 : 8;
+        riscv_word_t imm_11 : 1;
+        riscv_word_t imm_10_1 : 10;
+        riscv_word_t imm_20 : 1;
     } j;
 
     riscv_word_t raw;
