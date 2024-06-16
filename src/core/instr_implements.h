@@ -10,7 +10,7 @@
 #define i_get_imm(instr)       \
     ((int32_t)(instr.i.imm11_0 | ((instr.i.imm11_0 & (1 << 11)) ? (0xFFFFF << 12) : 0)))
 
-// I-Instruction
+// I-Instruction-Math
 static inline void handle_addi(riscv_t* riscv) {
     int32_t source = (int32_t)riscv_read_reg(riscv, riscv->instr.i.rs1);
     int32_t imm = (int32_t)i_get_imm(riscv->instr);
@@ -115,7 +115,7 @@ static inline void handle_srai_srli(riscv_t* riscv) {
     riscv->pc += sizeof(riscv_word_t);
 }
 
-// R-Instruction
+// R-Instruction-Math
 static inline void handle_add(riscv_t* riscv) {
     int32_t source1 = (int32_t) riscv_read_reg(riscv, riscv->instr.r.rs1);
     int32_t source2 = (int32_t) riscv_read_reg(riscv, riscv->instr.r.rs2);
@@ -229,6 +229,14 @@ static inline void handle_or(riscv_t* riscv) {
 
 static inline void handle_and(riscv_t* riscv) {
     
+}
+
+// U-Instruction
+static inline void handle_lui(riscv_t* riscv) {
+    // 取出前 20 位放在寄存器中     地址是无符号数
+    riscv_word_t imm20_0 = (riscv_word_t) riscv->instr.u.imm31_12 << 12;
+    riscv_write_reg(riscv, riscv->instr.u.rd, imm20_0);
+    riscv->pc += sizeof(riscv_word_t);
 }
 
 #endif /* INSTER_IMPL_H */

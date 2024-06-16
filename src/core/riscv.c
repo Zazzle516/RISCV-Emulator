@@ -180,6 +180,11 @@ void riscv_continue(riscv_t* riscv, int forever) {
             break;
         }
         
+        case OP_LUI: {
+            handle_lui(riscv);
+            break;
+        }
+        
         default:
             goto cond_end;
         }
