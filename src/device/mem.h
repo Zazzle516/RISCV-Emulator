@@ -10,9 +10,9 @@
 #define RISCV_MEM_ATTR_WRITABLE     (1 << 1)
 
 typedef struct _mem_t{
-    riscv_device_t riscv_dev;    // 待分配的外设数据结构空间(或者说空间柄更好理解)  
+    riscv_device_t riscv_dev;    // 待分配的外设数据结构空间
 
-    uint8_t* mem;                // 指向 Flash 空间的指针 32bit/4B
+    uint8_t* mem;                // 指向 Flash 空间的指针
 }mem_t;
 
 // 因为在 mem_t 结构体中传递的并不是 riscv_device_t 指针 所以这里应该传递所有参数

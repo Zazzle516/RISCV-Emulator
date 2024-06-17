@@ -11,9 +11,15 @@ typedef struct _riscv_device_t
     riscv_word_t attr;
     riscv_word_t addr_start;
     riscv_word_t addr_end;
-}riscv_device_t;
 
-// sizeof = char*(4B) + ref(4B * 3) = 16B
+    // 通过一个 next 指针构成设备链表
+    struct _riscv_device_t* next;
+
+    // 该设备对应的读写函数指针     回调使用
+    int (*read) (struct _riscv_device_t * dev, riscv_word_t addr, uint8_t * val, int width);
+    int (*write) (struct _riscv_device_t * dev,  riscv_word_t addr, uint8_t * val, int width);
+
+} riscv_device_t;
 
 // 在 C 语言中没有高级语言之类的构造函数 所以要主动传结构体(类)指针进去
 void device_init(riscv_device_t* myDev, const char* name, riscv_word_t attr,

@@ -19,6 +19,10 @@ typedef struct _riscv_t
 
     // 对应 CPU 中 IR: Instruction Register
     instr_t instr;
+
+    // 外部设备链表
+    riscv_device_t* device_list;
+    
 }riscv_t;
 
 /* 空间分配并且初始化 */
@@ -49,8 +53,14 @@ inline riscv_word_t riscv_read_reg(riscv_t* riscv, riscv_word_t reg) {
 // 在写入 image.bin 文件后对芯片进行重置
 void riscv_reset(riscv_t* riscv);
 
-// 语法解决部分
+// 模拟器核心执行流程
 void riscv_continue(riscv_t* riscv, int step);
+
+// 对外部设备读写
 int riscv_mem_read(riscv_t* riscv, riscv_word_t start_addr, uint8_t* val, int width);
+int riscv_mem_write(riscv_t* riscv, riscv_word_t start_addr, uint8_t* val, int width);
+
+// 增加对不同存储设备的添加支持
+void riscv_device_add(riscv_t* riscv, riscv_device_t* dev);
 
 #endif /* RISCV_H */

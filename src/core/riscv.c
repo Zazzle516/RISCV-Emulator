@@ -61,6 +61,15 @@ void riscv_reset(riscv_t* riscv) {
     riscv->instr.raw = 0;
 }
 
+// 添加不同外部设备
+void riscv_device_add(riscv_t* riscv, riscv_device_t* dev){
+    // 使用头插法完成设备的添加
+    dev->next = riscv->device_list;     // 首先指向头结点
+
+    riscv->device_list = dev;           // 重新链接起来
+}
+
+// 取值 -> 分析指令 -> 执行指令 流程模拟(核心)
 void riscv_continue(riscv_t* riscv, int forever) {
     // 取指 riscv->pc; 
 
@@ -184,7 +193,20 @@ void riscv_continue(riscv_t* riscv, int forever) {
             handle_lui(riscv);
             break;
         }
-        
+
+        case OP_SB: {
+            switch (riscv->instr.s.funct3)
+            {
+            case FUNC3_SB:
+                handle_sb(riscv);
+                break;
+            
+            default:
+                goto cond_end;
+            }
+            break;
+        }
+
         default:
             goto cond_end;
         }
@@ -195,7 +217,31 @@ cond_end:
     fprintf(stderr, "Unable to recognize %x\n", riscv->instr.raw);
 }
 
-// 语法解决部分
-int riscv_mem_read(riscv_t* riscv, riscv_word_t start_addr, uint8_t* val, int width){
+// 遍历外设链表 根据地址找到对应设备
+riscv_device_t* device_find(riscv_t* riscv, riscv_word_t addr) {
+    riscv_device_t* dev = riscv->device_list;
+    while (dev) {
+        if (addr >= dev->addr_start && addr < dev->addr_end) {
+            return dev;
+        }
+        dev = dev->next;
+    }
+    return NULL;
+}
+
+// 从模拟器的角度找到读写区域对应的设备 根据设备的特性去调用读写函数
+int riscv_mem_read(riscv_t* riscv, riscv_word_t start_addr, uint8_t* val, int width) {
+    riscv_device_t* targetDevice = device_find(riscv, start_addr);
+    
+    if (targetDevice == NULL) {
+        fprintf(stderr, "invaild read address\n");
+        return -1;
+    }
+    
+    // 注意 val 传入的是地址 因为你不知道用户要读取几个字节 所以以 1B 为单位 从首地址开始处理
+    return targetDevice->read(targetDevice, start_addr, val, width);
+}
+
+int riscv_mem_write(riscv_t* riscv, riscv_word_t start_addr, uint8_t* val, int width) {
     return 0;
 }
