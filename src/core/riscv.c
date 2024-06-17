@@ -59,6 +59,10 @@ void riscv_reset(riscv_t* riscv) {
 
     // 添加了指令结构体之后也重置指令
     riscv->instr.raw = 0;
+
+    // 重置 device_buffer
+    riscv->device_read_buffer = riscv->device_list;
+    riscv->device_write_buffer = riscv->device_list;
 }
 
 // 添加不同外部设备
@@ -67,6 +71,14 @@ void riscv_device_add(riscv_t* riscv, riscv_device_t* dev){
     dev->next = riscv->device_list;     // 首先指向头结点
 
     riscv->device_list = dev;           // 重新链接起来
+
+    // 初始化 device_buffer
+    if (riscv->device_read_buffer == NULL) {
+        riscv->device_read_buffer = dev;
+    }
+    if (riscv->device_write_buffer == NULL) {
+        riscv->device_write_buffer = dev;
+    }
 }
 
 // 取值 -> 分析指令 -> 执行指令 流程模拟(核心)
@@ -248,6 +260,7 @@ cond_end:
 
 // 遍历外设链表 根据地址找到对应设备
 riscv_device_t* device_find(riscv_t* riscv, riscv_word_t addr) {
+    // 在有 device_buffer 的情况下仍然没有找到 必须进行查找
     riscv_device_t* dev = riscv->device_list;
     while (dev) {
         if (addr >= dev->addr_start && addr < dev->addr_end) {
@@ -260,6 +273,10 @@ riscv_device_t* device_find(riscv_t* riscv, riscv_word_t addr) {
 
 // 从模拟器的角度找到读写区域对应的设备 根据设备的特性去调用读写函数
 int riscv_mem_read(riscv_t* riscv, riscv_word_t start_addr, uint8_t* val, int width) {
+    // 在实际的 read 操作中根据 device_buffer 优化
+    if (start_addr >= riscv->device_read_buffer->addr_start && start_addr < riscv->device_read_buffer->addr_end) {
+        return riscv->device_read_buffer->read(riscv->device_read_buffer, start_addr, val, width);
+    }
     riscv_device_t* targetDevice = device_find(riscv, start_addr);
     
     if (targetDevice == NULL) {
@@ -267,11 +284,17 @@ int riscv_mem_read(riscv_t* riscv, riscv_word_t start_addr, uint8_t* val, int wi
         return -1;
     }
     
+    // 更新缓存
+    riscv->device_read_buffer = targetDevice;
+
     // 注意 val 传入的是地址 因为你不知道用户要读取几个字节 所以以 1B 为单位 从首地址开始处理
     return targetDevice->read(targetDevice, start_addr, val, width);
 }
 
 int riscv_mem_write(riscv_t* riscv, riscv_word_t start_addr, uint8_t* val, int width) {
+    if (start_addr >= riscv->device_write_buffer->addr_start && start_addr < riscv->device_write_buffer->addr_end) {
+        return riscv->device_write_buffer->read(riscv->device_write_buffer, start_addr, val, width);
+    }
     riscv_device_t* targetDevice = device_find(riscv, start_addr);
     
     if (targetDevice == NULL) {
@@ -280,5 +303,7 @@ int riscv_mem_write(riscv_t* riscv, riscv_word_t start_addr, uint8_t* val, int w
         return -1;
     }
     
+    riscv->device_write_buffer = targetDevice;
+
     return targetDevice->write(targetDevice, start_addr, val, width);
 }
