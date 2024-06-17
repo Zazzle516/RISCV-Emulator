@@ -200,13 +200,35 @@ void riscv_continue(riscv_t* riscv, int forever) {
             case FUNC3_SB:
                 handle_sb(riscv);
                 break;
-            
+            case FUNC3_SH:
+                handle_sh(riscv);
+                break;
+            case FUNC3_SW:
+                handle_sw(riscv);
+                break;
             default:
                 goto cond_end;
             }
             break;
         }
 
+        case OP_LB: {
+            switch (riscv->instr.i.funct3)
+            {
+            case FUNC3_LB:
+                handle_lb(riscv);
+                break;
+            case FUNC3_LH:
+                handle_lh(riscv);
+                break;
+            case FUNC3_LW:
+                handle_lw(riscv);
+                break;
+            default:
+                break;
+            }
+            break;
+        }
         default:
             goto cond_end;
         }
@@ -243,5 +265,13 @@ int riscv_mem_read(riscv_t* riscv, riscv_word_t start_addr, uint8_t* val, int wi
 }
 
 int riscv_mem_write(riscv_t* riscv, riscv_word_t start_addr, uint8_t* val, int width) {
-    return 0;
+    riscv_device_t* targetDevice = device_find(riscv, start_addr);
+    
+    if (targetDevice == NULL) {
+        fprintf(stderr, "current instr: %x\n", riscv->instr.raw);
+        fprintf(stderr, "invaild write address\n");
+        return -1;
+    }
+    
+    return targetDevice->write(targetDevice, start_addr, val, width);
 }

@@ -41,7 +41,7 @@ static int mem_read (struct _riscv_device_t* dev, riscv_word_t addr, uint8_t* va
 // 把 val 的内容写到 addr 中
 static int mem_write (struct _riscv_device_t * dev,  riscv_word_t addr, uint8_t * val, int size) {
     if ((dev->attr & RISCV_MEM_ATTR_WRITABLE) == 0) {
-        fprintf(stderr, "write to readonly memory\n");
+        fprintf(stderr, "write to write-only memory\n");
         return -1;
     }
 

@@ -244,8 +244,7 @@ static inline int32_t s_get_offset(instr_t instr) {
     riscv_word_t temp = instr.s.imm11_5 << 5 | instr.s.imm4_0;       // 一共 12 位 需要转换到 32 位
     if (instr.s.imm11_5 & (1 << 6)) {
         // 负数 首位补 1
-        // 为什么后面的运算是偏移 11 而不是 12 注意这里的运算是下标依赖(要考虑到 0 )    而其他命令中的 shamt 是数量依赖(单纯加减满足 32 就可以)
-        return (int32_t)(temp | (0xFFFFF << 11));
+        return (int32_t)(temp | (0xFFFFF << 12));
     }
     return (int32_t)temp;
 }
@@ -258,8 +257,33 @@ static inline void handle_sb(riscv_t* riscv) {
     riscv_word_t target = riscv_read_reg(riscv, riscv->instr.s.rs2);
     
     // Q: 为什么在传具体值 target 的时候要传地址
+    // A: 后续要通过地址处理 根据读写单位 uint8_t 和 width 决定写入多少
     riscv_mem_write(riscv, base_addr + offset, (uint8_t*) &target, 1);
 
     riscv->pc += sizeof(riscv_word_t);
 }
+
+static inline void handle_sh(riscv_t* riscv) {
+    riscv_word_t base_addr = riscv_read_reg(riscv, riscv->instr.s.rs1);
+    int32_t offset = s_get_offset(riscv->instr);
+    riscv_word_t target = riscv_read_reg(riscv, riscv->instr.s.rs2);
+    
+    riscv_mem_write(riscv, base_addr + offset, (uint8_t*) &target, 2);
+
+    riscv->pc += sizeof(riscv_word_t);
+}
+
+static inline void handle_sw(riscv_t* riscv) {
+    riscv_word_t base_addr = riscv_read_reg(riscv, riscv->instr.s.rs1);
+    int32_t offset = s_get_offset(riscv->instr);
+    riscv_word_t target = riscv_read_reg(riscv, riscv->instr.s.rs2);
+
+    riscv_mem_write(riscv, base_addr + offset, (uint8_t*) &target, 4);
+
+    riscv->pc += sizeof(riscv_word_t);
+}
+
+
+
+
 #endif /* INSTER_IMPL_H */
