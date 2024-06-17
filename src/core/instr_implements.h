@@ -239,7 +239,7 @@ static inline void handle_lui(riscv_t* riscv) {
     riscv->pc += sizeof(riscv_word_t);
 }
 
-// 获取一个 32 位有符号数
+// 辅助函数: 获取一个 32 位有符号数
 static inline int32_t s_get_offset(instr_t instr) {
     riscv_word_t temp = instr.s.imm11_5 << 5 | instr.s.imm4_0;       // 一共 12 位 需要转换到 32 位
     if (instr.s.imm11_5 & (1 << 6)) {
@@ -251,9 +251,9 @@ static inline int32_t s_get_offset(instr_t instr) {
 
 // S-Instruction-STORE
 static inline void handle_sb(riscv_t* riscv) {
-    // rs2->rs1 + offset    注意 offset 是有符号数    将一个字节存储在内存中
+    // 将寄存器数据写到内存中
     riscv_word_t base_addr = riscv_read_reg(riscv, riscv->instr.s.rs1);
-    int32_t offset = s_get_offset(riscv->instr);
+    int32_t offset = s_get_offset(riscv->instr);        // 注意 offset 是有符号数
     riscv_word_t target = riscv_read_reg(riscv, riscv->instr.s.rs2);
     
     // Q: 为什么在传具体值 target 的时候要传地址
@@ -283,7 +283,72 @@ static inline void handle_sw(riscv_t* riscv) {
     riscv->pc += sizeof(riscv_word_t);
 }
 
+// I-Instruction-LOAD
+static inline void handle_lb(riscv_t* riscv) {
+    // 从内存中加载数据到寄存器中
+    riscv_word_t base_addr = riscv_read_reg(riscv, riscv->instr.i.rs1);
+    int32_t offset = i_get_imm(riscv->instr);
+    riscv_word_t load_addr = base_addr + offset;    // 获取要读取的数据的内存地址
 
+    uint8_t res = 0;
+    riscv_mem_read(riscv, load_addr, &res, 1);
 
+    // 注意 res 是 uin8_t 类型 不能接收符号扩展后的结果 没有意义
+    riscv_word_t new_val = res & (1 << 7) ? (res | 0xFFFFFF00) : res;
+    riscv_write_reg(riscv, riscv->instr.i.rd, new_val);
+    
+    riscv->pc += sizeof(riscv_word_t);
+}
+
+static inline void handle_lh(riscv_t* riscv) {
+    riscv_word_t base_addr = riscv_read_reg(riscv, riscv->instr.i.rs1);
+    int32_t offset = i_get_imm(riscv->instr);
+    riscv_word_t load_addr = base_addr + offset;
+
+    uint16_t res = 0;
+    riscv_mem_read(riscv, load_addr, (uint8_t*)&res, 2);
+    riscv_word_t new_val = res & (1 << 15) ? (res | 0xFFFF0000) : res;
+    riscv_write_reg(riscv, riscv->instr.i.rd, new_val);
+
+    riscv->pc += sizeof(riscv_word_t);
+}
+
+static inline void handle_lw(riscv_t* riscv) {
+    riscv_word_t base_addr = riscv_read_reg(riscv, riscv->instr.i.rs1);
+    int32_t offset = i_get_imm(riscv->instr);
+    riscv_word_t load_addr = base_addr + offset;
+
+    uint32_t res = 0;
+    riscv_mem_read(riscv, load_addr, (uint8_t*)&res, 4);    // 已经读满 不需要符号扩展
+    riscv_write_reg(riscv, riscv->instr.i.rd, res);
+
+    riscv->pc += sizeof(riscv_word_t);
+}
+
+static inline void handle_lbu(riscv_t* riscv) {
+    // 不需要符号扩展的加载方式
+    riscv_word_t base_addr = riscv_read_reg(riscv, riscv->instr.i.rs1);
+    int32_t offset = i_get_imm(riscv->instr);
+    riscv_word_t load_addr = base_addr + offset;
+
+    uint8_t res = 0;
+    riscv_mem_read(riscv, load_addr, &res, 1);
+    riscv_write_reg(riscv, riscv->instr.i.rd, res);
+
+    riscv->pc += sizeof(riscv_word_t);
+}
+
+static inline void handle_lhu(riscv_t* riscv) {
+    // 不需要符号扩展的加载方式
+    riscv_word_t base_addr = riscv_read_reg(riscv, riscv->instr.i.rs1);
+    int32_t offset = i_get_imm(riscv->instr);
+    riscv_word_t load_addr = base_addr + offset;
+
+    uint16_t res = 0;
+    riscv_mem_read(riscv, load_addr, (uint8_t*)&res, 2);
+    riscv_write_reg(riscv, riscv->instr.i.rd, res);
+
+    riscv->pc += sizeof(riscv_word_t);
+}
 
 #endif /* INSTER_IMPL_H */

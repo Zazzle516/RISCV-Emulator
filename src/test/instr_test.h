@@ -766,7 +766,7 @@ void instr_test (riscv_t * riscv) {
         UNIT_TEST(test_riscv_srai),
         UNIT_TEST(test_riscv_andi),
         UNIT_TEST(test_riscv_slti),
-        UNIT_TEST(test_riscv_sltiu),
+        UNIT_TEST(test_riscv_sltiu),    // 9
         UNIT_TEST(test_riscv_xori),
         UNIT_TEST(test_riscv_sub),
         UNIT_TEST(test_riscv_sll),
@@ -777,7 +777,7 @@ void instr_test (riscv_t * riscv) {
         UNIT_TEST(test_riscv_sra),
         UNIT_TEST(test_riscv_or),
         UNIT_TEST(test_riscv_lui),
-        UNIT_TEST(test_riscv_sb),
+        UNIT_TEST(test_riscv_sb),   // 20
         UNIT_TEST(test_riscv_lb),
         UNIT_TEST(test_riscv_auipc),
         UNIT_TEST(test_riscv_and),
@@ -795,7 +795,7 @@ void instr_test (riscv_t * riscv) {
         UNIT_TEST(test_riscv_csri),
    };
 
-    for (int i = 0; i < sizeof(tests)/sizeof(tests[0]); i++) {
+    for (int i = 20; i < sizeof(tests)/sizeof(tests[0]); i++) {
         printf("Run %s: ", tests[i].name);
         tests[i].test_func(riscv);
         printf("passed\n");

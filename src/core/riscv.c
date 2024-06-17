@@ -224,11 +224,18 @@ void riscv_continue(riscv_t* riscv, int forever) {
             case FUNC3_LW:
                 handle_lw(riscv);
                 break;
-            default:
+            case FUNC3_LBU:
+                handle_lbu(riscv);
                 break;
+            case FUNC3_LHU:
+                handle_lhu(riscv);
+                break;
+            default:
+                goto cond_end;
             }
             break;
         }
+        
         default:
             goto cond_end;
         }
