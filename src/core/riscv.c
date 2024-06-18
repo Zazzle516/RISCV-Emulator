@@ -268,12 +268,27 @@ void riscv_continue(riscv_t* riscv, int forever) {
             case FUNC3_BEQ:
                 handle_beq(riscv);
                 break;
-            
+            case FUNC3_BNE:
+                handle_bne(riscv);
+                break;
+            case FUNC3_BLT:
+                handle_blt(riscv);
+                break;
+            case FUNC3_BGE:
+                handle_bge(riscv);
+                break;
+            case FUNC3_BLTU:
+                handle_bltu(riscv);
+                break;
+            case FUNC3_BGEU:
+                handle_bgeu(riscv);
+                break;
             default:
                 goto cond_end;
             }
             break;
         }
+        
         default:
             goto cond_end;
         }

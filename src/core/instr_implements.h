@@ -403,5 +403,90 @@ static inline void handle_jalr(riscv_t* riscv) {
     return;
 }
 
+// 辅助函数 
+static inline int32_t b_get_imm(instr_t instr) {
+    riscv_word_t temp = (instr.b.imm_4_1 << 1) | (instr.b.imm_10_5 << 5) | (instr.b.imm_11 << 11) | (instr.b.imm_12 << 12);
+    if (instr.b.imm_12 == 1) {
+        // 负数补 1
+        return (int32_t)(temp | 0xFFFFE000);
+    }
+    return (int32_t)temp;
+}
+
+// B-Instrction-JUMP
+static inline void handle_beq(riscv_t* riscv) {
+    // 如果比较的两个寄存器的值相等 则进行跳转
+    riscv_word_t source1 = riscv_read_reg(riscv, riscv->instr.b.rs1);
+    riscv_word_t source2 = riscv_read_reg(riscv, riscv->instr.b.rs2);
+
+    if (source1 == source2) {
+        int32_t offset = b_get_imm(riscv->instr);
+        riscv->pc = (offset + riscv->pc);
+    } else {
+        riscv->pc += sizeof(riscv_word_t);
+    }
+}
+
+static inline void handle_bne(riscv_t* riscv) {
+    // 如果比较的两个寄存器的值相等 则进行跳转
+    riscv_word_t source1 = riscv_read_reg(riscv, riscv->instr.b.rs1);
+    riscv_word_t source2 = riscv_read_reg(riscv, riscv->instr.b.rs2);
+
+    if (source1 != source2) {
+        int32_t offset = b_get_imm(riscv->instr);
+        riscv->pc = (offset + riscv->pc);
+    } else {
+        riscv->pc += sizeof(riscv_word_t);
+    }
+}
+
+static inline void handle_blt(riscv_t* riscv) {
+    int32_t source1 = (int32_t)riscv_read_reg(riscv, riscv->instr.b.rs1);
+    int32_t source2 = (int32_t)riscv_read_reg(riscv, riscv->instr.b.rs2);
+    
+    if (source1 < source2) {
+        int32_t offset = b_get_imm(riscv->instr);
+        riscv->pc = riscv->pc + offset;
+    } else {
+        riscv->pc += sizeof(riscv_word_t);
+    }
+}
+
+static inline void handle_bge(riscv_t* riscv) {
+    int32_t source1 = (int32_t)riscv_read_reg(riscv, riscv->instr.b.rs1);
+    int32_t source2 = (int32_t)riscv_read_reg(riscv, riscv->instr.b.rs2);
+    
+    if (source1 >= source2) {
+        int32_t offset = b_get_imm(riscv->instr);
+        riscv->pc = riscv->pc + offset;
+    } else {
+        riscv->pc += sizeof(riscv_word_t);
+    }
+}
+
+static inline void handle_bltu(riscv_t* riscv) {
+    // 无符号比较 涉及到大小比较才会有符号问题  如果只是单纯的判断相等则不需要
+    riscv_word_t source1 = riscv_read_reg(riscv, riscv->instr.b.rs1);
+    riscv_word_t source2 = riscv_read_reg(riscv, riscv->instr.b.rs2);
+    
+    if (source1 < source2) {
+        int32_t offset = b_get_imm(riscv->instr);
+        riscv->pc = riscv->pc + offset;
+    } else {
+        riscv->pc += sizeof(riscv_word_t);
+    }
+}
+
+static inline void handle_bgeu(riscv_t* riscv) {
+    riscv_word_t source1 = riscv_read_reg(riscv, riscv->instr.b.rs1);
+    riscv_word_t source2 = riscv_read_reg(riscv, riscv->instr.b.rs2);
+    
+    if (source1 >= source2) {
+        int32_t offset = b_get_imm(riscv->instr);
+        riscv->pc = riscv->pc + offset;
+    } else {
+        riscv->pc += sizeof(riscv_word_t);
+    }
+}
 
 #endif /* INSTER_IMPL_H */
