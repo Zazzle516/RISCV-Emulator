@@ -351,4 +351,15 @@ static inline void handle_lhu(riscv_t* riscv) {
     riscv->pc += sizeof(riscv_word_t);
 }
 
+// J-Instruction
+static inline void handle_auipc(riscv_t* riscv) {
+    // 将立即数左移 12 位
+    riscv_word_t imm = riscv->instr.u.imm31_12 << 12;
+    riscv_word_t current_pc = riscv_read_reg(riscv, riscv->pc);
+
+    riscv_word_t new_addr = current_pc + imm;
+    riscv_write_reg(riscv, riscv->instr.u.rd, new_addr);
+
+    riscv->pc += sizeof(riscv_word_t);
+}
 #endif /* INSTER_IMPL_H */

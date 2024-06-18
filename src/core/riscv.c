@@ -248,6 +248,11 @@ void riscv_continue(riscv_t* riscv, int forever) {
             break;
         }
         
+        case OP_AUIPC: {
+            handle_auipc(riscv);
+            break;
+        }
+        
         default:
             goto cond_end;
         }
