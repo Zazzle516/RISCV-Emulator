@@ -22,6 +22,10 @@ typedef struct _riscv_t
 
     // 外部设备链表
     riscv_device_t* device_list;
+
+    // 添加读写设备缓存
+    riscv_device_t* dev_read_buffer;
+    riscv_device_t* dev_write_buffer;
     
 }riscv_t;
 

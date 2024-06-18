@@ -59,6 +59,9 @@ void riscv_reset(riscv_t* riscv) {
 
     // 添加了指令结构体之后也重置指令
     riscv->instr.raw = 0;
+
+    // 重新读写设备缓存
+    riscv->dev_read_buffer = riscv->dev_write_buffer = riscv->device_list;
 }
 
 // 添加不同外部设备
@@ -67,6 +70,14 @@ void riscv_device_add(riscv_t* riscv, riscv_device_t* dev){
     dev->next = riscv->device_list;     // 首先指向头结点
 
     riscv->device_list = dev;           // 重新链接起来
+
+    // 初始化读写缓存设备
+    if (riscv->dev_read_buffer == NULL) {
+        riscv->dev_read_buffer = dev;
+    }
+    if (riscv->dev_write_buffer == NULL) {
+        riscv->dev_write_buffer = dev;
+    }
 }
 
 // 取值 -> 分析指令 -> 执行指令 流程模拟(核心)
@@ -260,18 +271,27 @@ riscv_device_t* device_find(riscv_t* riscv, riscv_word_t addr) {
 
 // 从模拟器的角度找到读写区域对应的设备 根据设备的特性去调用读写函数
 int riscv_mem_read(riscv_t* riscv, riscv_word_t start_addr, uint8_t* val, int width) {
+    // 利用读缓存设备优化
+    if (start_addr >= riscv->dev_read_buffer && start_addr < riscv->dev_read_buffer->addr_end) {
+        return riscv->dev_read_buffer->read(riscv->dev_read_buffer, start_addr, val, width);
+    }
+
     riscv_device_t* targetDevice = device_find(riscv, start_addr);
     
     if (targetDevice == NULL) {
         fprintf(stderr, "invaild read address\n");
         return -1;
     }
-    
+    riscv->dev_read_buffer = targetDevice;
     // 注意 val 传入的是地址 因为你不知道用户要读取几个字节 所以以 1B 为单位 从首地址开始处理
     return targetDevice->read(targetDevice, start_addr, val, width);
 }
 
 int riscv_mem_write(riscv_t* riscv, riscv_word_t start_addr, uint8_t* val, int width) {
+    // 利用写缓存设备优化
+    if (start_addr >= riscv->dev_write_buffer && start_addr < riscv->dev_write_buffer->addr_end) {
+        return riscv->dev_write_buffer->write(riscv->dev_write_buffer, start_addr, val, width);
+    }
     riscv_device_t* targetDevice = device_find(riscv, start_addr);
     
     if (targetDevice == NULL) {
@@ -280,5 +300,6 @@ int riscv_mem_write(riscv_t* riscv, riscv_word_t start_addr, uint8_t* val, int w
         return -1;
     }
     
+    riscv->dev_write_buffer = targetDevice;
     return targetDevice->write(targetDevice, start_addr, val, width);
 }
