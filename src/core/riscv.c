@@ -72,11 +72,11 @@ void riscv_device_add(riscv_t* riscv, riscv_device_t* dev){
     riscv->device_list = dev;           // 重新链接起来
 
     // 初始化 device_buffer
-    if (riscv->device_read_buffer == NULL) {
-        riscv->device_read_buffer = dev;
+    if (riscv->dev_read_buffer == NULL) {
+        riscv->dev_read_buffer = dev;
     }
-    if (riscv->device_write_buffer == NULL) {
-        riscv->device_write_buffer = dev;
+    if (riscv->dev_write_buffer == NULL) {
+        riscv->dev_write_buffer = dev;
     }
 }
 
@@ -278,7 +278,7 @@ riscv_device_t* device_find(riscv_t* riscv, riscv_word_t addr) {
 // 从模拟器的角度找到读写区域对应的设备 根据设备的特性去调用读写函数
 int riscv_mem_read(riscv_t* riscv, riscv_word_t start_addr, uint8_t* val, int width) {
     // 利用读缓存设备优化
-    if (start_addr >= riscv->dev_read_buffer && start_addr < riscv->dev_read_buffer->addr_end) {
+    if (start_addr >= riscv->dev_read_buffer->addr_start && start_addr < riscv->dev_read_buffer->addr_end) {
         return riscv->dev_read_buffer->read(riscv->dev_read_buffer, start_addr, val, width);
     }
 
@@ -295,7 +295,7 @@ int riscv_mem_read(riscv_t* riscv, riscv_word_t start_addr, uint8_t* val, int wi
 
 int riscv_mem_write(riscv_t* riscv, riscv_word_t start_addr, uint8_t* val, int width) {
     // 利用写缓存设备优化
-    if (start_addr >= riscv->dev_write_buffer && start_addr < riscv->dev_write_buffer->addr_end) {
+    if (start_addr >= riscv->dev_write_buffer->addr_start && start_addr < riscv->dev_write_buffer->addr_end) {
         return riscv->dev_write_buffer->write(riscv->dev_write_buffer, start_addr, val, width);
     }
     riscv_device_t* targetDevice = device_find(riscv, start_addr);
