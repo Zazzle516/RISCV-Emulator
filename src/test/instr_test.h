@@ -570,7 +570,7 @@ static void test_riscv_jalr (riscv_t * riscv) {
     // 复位内核
     riscv_reset(riscv);
 
-    // 单步调试，观察其运行流程
+    // 通过 forever = 0 进行单步调试，观察其运行流程
     riscv_continue(riscv, 0);
     riscv_continue(riscv, 0);
     riscv_continue(riscv, 0);

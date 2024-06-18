@@ -228,7 +228,13 @@ static inline void handle_or(riscv_t* riscv) {
 }
 
 static inline void handle_and(riscv_t* riscv) {
-    
+    riscv_word_t source1 = riscv_read_reg(riscv, riscv->instr.r.rs1);
+    riscv_word_t source2 = riscv_read_reg(riscv, riscv->instr.r.rs2);
+
+    riscv_word_t result = source1 & source2;
+    riscv_write_reg(riscv, riscv->instr.r.rd, result);
+
+    riscv->pc += sizeof(riscv_word_t);
 }
 
 // U-Instruction
@@ -351,15 +357,51 @@ static inline void handle_lhu(riscv_t* riscv) {
     riscv->pc += sizeof(riscv_word_t);
 }
 
-// J-Instruction
+// J-Instruction-Math
 static inline void handle_auipc(riscv_t* riscv) {
     // 将立即数左移 12 位
     riscv_word_t imm = riscv->instr.u.imm31_12 << 12;
-    riscv_word_t current_pc = riscv_read_reg(riscv, riscv->pc);
+    riscv_word_t current_pc = riscv->pc;
 
     riscv_word_t new_addr = current_pc + imm;
     riscv_write_reg(riscv, riscv->instr.u.rd, new_addr);
 
     riscv->pc += sizeof(riscv_word_t);
 }
+
+// 辅助函数: 获取一个 32 位有符号数
+static inline int32_t j_get_imm(instr_t instr) {
+    riscv_word_t temp = (instr.j.imm_20 << 20) | (instr.j.imm_19_12 << 12) | (instr.j.imm_10_1 << 1) | (instr.j.imm_11 << 11);
+    if (instr.j.imm_20 == 1) {
+        // 负数补 1
+        return (temp | 0xFFF00000);
+    }
+    return temp;
+}
+
+// J-Instruction-JUMP
+static inline void handle_jal(riscv_t* riscv) {
+    // 将立即数的结果存储在 pc 中
+    int32_t offset = j_get_imm(riscv->instr);
+    riscv_write_reg(riscv, riscv->instr.j.rd, riscv->pc + 4);
+    riscv->pc = (riscv_word_t)(riscv->pc + offset);
+    return;
+}
+
+// I-Instruction-JUMP
+static inline void handle_jalr(riscv_t* riscv) {
+    // 保存断点
+    riscv_write_reg(riscv, riscv->instr.i.rd, riscv->pc + 4);
+
+    // 跳转基地址
+    riscv_word_t base = riscv_read_reg(riscv, riscv->instr.i.rs1);
+
+    // 跳转偏移量
+    int32_t offset = i_get_imm(riscv->instr);
+
+    riscv->pc = base + offset;
+    return;
+}
+
+
 #endif /* INSTER_IMPL_H */

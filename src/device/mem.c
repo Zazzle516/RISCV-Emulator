@@ -20,7 +20,7 @@ static int mem_read (struct _riscv_device_t* dev, riscv_word_t addr, uint8_t* va
     mem_t* myMemory = (mem_t*) dev;     // 扩大的强制类型转换   需要在后续传参的时候注意    Q: 以及为什么已经决定扩大了还要传 riscv_device_t 类型
     
     // Q: 为什么要用偏移量
-    // A: 逻辑地址和物理地址的区别  dev->addr_start 逻辑地址    mem_t->mem 物理地址
+    // A: 模拟器的物理地址和本机物理地址的区别  最终的地址是一个 64 位的地址
     
     // Q: 为什么偏移量用 uint32_t 接收  和 int32_t 的偏移量有什么区别
     // A: 因为是逻辑地址并且一定高于起始地址 所以结果一定是正数

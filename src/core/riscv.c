@@ -252,6 +252,28 @@ void riscv_continue(riscv_t* riscv, int forever) {
             break;
         }
         
+        case OP_JAL: {
+            handle_jal(riscv);
+            break;
+        }
+
+        case OP_JALR: {
+            handle_jalr(riscv);
+            break;
+        }
+
+        case OP_BEQ: {
+            switch (riscv->instr.r.funct3)
+            {
+            case FUNC3_BEQ:
+                handle_beq(riscv);
+                break;
+            
+            default:
+                goto cond_end;
+            }
+            break;
+        }
         default:
             goto cond_end;
         }
