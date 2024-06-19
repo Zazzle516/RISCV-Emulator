@@ -168,32 +168,120 @@ void riscv_continue(riscv_t* riscv, int forever) {
                     case FUNC7_SUB:
                         handle_sub(riscv);
                         break;
+                    case FUNC7_MUL:
+                        handle_mul(riscv);
+                        break;
                     default:
                         goto cond_end;
                     }
                     break;
                 }
-                case FUNC3_SLL:
-                    handle_sll(riscv);
+                
+                case FUNC3_SLL: {
+                    switch (riscv->instr.r.funct7)
+                    {
+                    case FUNC7_MUL:
+                        handle_mulh(riscv);
+                        break;
+                    case FUNC7_ADD:
+                        handle_sll(riscv);
+                        break;
+                    default:
+                        goto cond_end;
+                    }
                     break;
-                case FUNC3_SLT:
-                    handle_slt(riscv);
+                }
+                    
+                case FUNC3_SLT: {
+                    switch (riscv->instr.r.funct7)
+                    {
+                    case FUNC7_MUL:
+                        handle_mulhsu(riscv);
+                        break;
+                    case FUNC7_ADD:
+                        handle_slt(riscv);
+                        break;
+                    default:
+                        goto cond_end;
+                    }
                     break;
-                case FUNC3_SLTU:
-                    handle_sltu(riscv);
+                }
+                    
+                case FUNC3_SLTU: {
+                    switch (riscv->instr.r.funct7)
+                    {
+                    case FUNC7_ADD:
+                        handle_sltu(riscv);
+                        break;
+                    case FUNC7_MUL:
+                        handle_mulhu(riscv);
+                        break;
+                    default:
+                        goto cond_end;
+                    }
                     break;
-                case FUNC3_XOR:
-                    handle_xor(riscv);
+                }
+                
+                case FUNC3_XOR: {
+                    switch (riscv->instr.r.funct7)
+                    {
+                    case FUNC7_DIV:
+                        handle_div(riscv);
+                        break;
+                    case FUNC7_ADD:
+                        handle_xor(riscv);
+                        break;
+                    default:
+                        goto cond_end;
+                    }
                     break;
-                case FUNC3_SR:
-                    handle_srl_sra(riscv);
+                }
+
+                case FUNC3_SR: {
+                    switch (riscv->instr.r.funct7)
+                    {
+                    case FUNC7_DIV:
+                        handle_divu(riscv);
+                        break;
+                    case FUNC7_ADD:
+                        handle_srl_sra(riscv);
+                        break;
+                    default:
+                        goto cond_end;
+                    }
                     break;
-                case FUNC3_OR:
-                    handle_or(riscv);
+                }
+
+                case FUNC3_OR: {
+                    switch (riscv->instr.r.funct7)
+                    {
+                    case FUNC7_ADD:
+                        handle_or(riscv);
+                        break;
+                    case FUNC7_DIV:
+                        handle_rem(riscv);
+                        break;
+                    default:
+                        goto cond_end;
+                    }
                     break;
-                case FUNC3_AND:
-                    handle_and(riscv);
+                }
+
+                case FUNC3_AND: {
+                    switch (riscv->instr.r.funct7)
+                    {
+                    case FUNC7_ADD:
+                        handle_and(riscv);
+                        break;
+                    case FUNC7_DIV:
+                        handle_remu(riscv);
+                        break;
+                    default:
+                        goto cond_end;
+                    }
                     break;
+                }
+
                 default:
                     goto cond_end;
                 }

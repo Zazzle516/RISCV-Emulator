@@ -489,4 +489,91 @@ static inline void handle_bgeu(riscv_t* riscv) {
     }
 }
 
+// M-Extension
+static inline void handle_mul(riscv_t* riscv) {
+    // 对于超出 32 位的乘法结果直接截断
+    int32_t source1 = (int32_t)riscv_read_reg(riscv, riscv->instr.r.rs1);
+    int32_t source2 = (int32_t)riscv_read_reg(riscv, riscv->instr.r.rs2);
+
+    int32_t result = (int32_t)(source1 * source2);
+    riscv_write_reg(riscv, riscv->instr.r.rd, result);
+
+    riscv->pc += sizeof(riscv_word_t);
+}
+
+// 辅助函数 针对 64 位的扩展函数
+static inline int64_t s_extend_64(int32_t temp) {
+    if (temp < 0) {
+        return (int64_t) (temp | (0xFFFFFFFF00000000));
+    }
+    return (int64_t)temp;
+}
+
+static inline void handle_mulh(riscv_t* riscv) {
+    int64_t source1 = s_extend_64((int32_t) riscv_read_reg(riscv, riscv->instr.r.rs1));
+    int64_t source2 = s_extend_64((int32_t) riscv_read_reg(riscv, riscv->instr.r.rs2));
+
+    riscv_word_t result = ((source1 * source2) >> 32);
+    riscv_write_reg(riscv, riscv->instr.r.rd, result);
+
+    riscv->pc += sizeof(riscv_word_t);
+}
+
+static inline void handle_mulhsu(riscv_t* riscv) {
+    // 执行一个有符号和无符号的乘法操作 并将高位放入目标寄存器中
+    int64_t sign_source = s_extend_64((int32_t)riscv_read_reg(riscv, riscv->instr.r.rs1));
+    uint64_t unsign_source = (uint64_t)riscv_read_reg(riscv, riscv->instr.r.rs2);
+
+    riscv_word_t result = (sign_source * unsign_source) >> 32;
+    riscv_write_reg(riscv, riscv->instr.r.rd, result);
+
+    riscv->pc += sizeof(riscv_word_t);
+}
+
+static inline void handle_mulhu(riscv_t* riscv) {
+    // 执行两个无符号的乘法操作 并将高位放入目标寄存器中
+    uint64_t sign_source = (int64_t)riscv_read_reg(riscv, riscv->instr.r.rs1);
+    uint64_t unsign_source = (uint64_t)riscv_read_reg(riscv, riscv->instr.r.rs2);
+
+    riscv_word_t result = (sign_source * unsign_source) >> 32;
+    riscv_write_reg(riscv, riscv->instr.r.rd, result);
+
+    riscv->pc += sizeof(riscv_word_t);
+}
+
+static inline void handle_div(riscv_t* riscv) {
+    int32_t rs1 = (int32_t)riscv_read_reg(riscv, riscv->instr.r.rs1);
+    int32_t rs2 = (int32_t)riscv_read_reg(riscv, riscv->instr.r.rs2);
+
+    riscv_write_reg(riscv, riscv->instr.r.rd, rs1 / rs2);
+
+    riscv->pc += sizeof(riscv_word_t);
+}
+
+static inline void handle_divu(riscv_t* riscv) {
+    riscv_word_t rs1 = riscv_read_reg(riscv, riscv->instr.r.rs1);
+    riscv_word_t rs2 = riscv_read_reg(riscv, riscv->instr.r.rs2);
+
+    riscv_write_reg(riscv, riscv->instr.r.rd, rs1 / rs2);
+
+    riscv->pc += sizeof(riscv_word_t);
+}
+
+static inline void handle_rem(riscv_t* riscv) {
+    int32_t rs1 = (int32_t)riscv_read_reg(riscv, riscv->instr.r.rs1);
+    int32_t rs2 = (int32_t)riscv_read_reg(riscv, riscv->instr.r.rs2);
+
+    riscv_write_reg(riscv, riscv->instr.r.rd, rs1 % rs2);
+
+    riscv->pc += sizeof(riscv_word_t);
+}
+
+static inline void handle_remu(riscv_t* riscv) {
+    riscv_word_t rs1 = riscv_read_reg(riscv, riscv->instr.r.rs1);
+    riscv_word_t rs2 = riscv_read_reg(riscv, riscv->instr.r.rs2);
+
+    riscv_write_reg(riscv, riscv->instr.r.rd, rs1 % rs2);
+
+    riscv->pc += sizeof(riscv_word_t);
+}
 #endif /* INSTER_IMPL_H */

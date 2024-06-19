@@ -777,7 +777,7 @@ void instr_test (riscv_t * riscv) {
         UNIT_TEST(test_riscv_sra),
         UNIT_TEST(test_riscv_or),
         UNIT_TEST(test_riscv_lui),
-        UNIT_TEST(test_riscv_sb),   // 20
+        UNIT_TEST(test_riscv_sb),       // 20
         UNIT_TEST(test_riscv_lb),
         UNIT_TEST(test_riscv_auipc),
         UNIT_TEST(test_riscv_and),
