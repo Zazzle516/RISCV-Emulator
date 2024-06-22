@@ -7,6 +7,15 @@
 
 #define RISCV_REG_NUM 32
 
+// CSR 内存映射地址
+#define RISCV_MSCRATCH  0x340
+
+// 由于无法解决头文件的嵌套问题 所以还是写在同一个文件里
+typedef struct _riscv_csr_t
+{
+    riscv_word_t mscratch;
+}riscv_csr_t;
+
 
 typedef struct _riscv_t
 {
@@ -26,8 +35,14 @@ typedef struct _riscv_t
     // 添加读写设备缓存
     riscv_device_t* dev_read_buffer;
     riscv_device_t* dev_write_buffer;
+
+    // 定义 CSR 寄存器
+    riscv_csr_t riscv_csr_regs;
     
 }riscv_t;
+
+// CSR 相关函数
+void riscv_csr_init(riscv_t* riscv);
 
 /* 空间分配并且初始化 */
 riscv_t* riscv_create(void);

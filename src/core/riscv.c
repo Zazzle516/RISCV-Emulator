@@ -4,6 +4,12 @@
 #include<stdio.h>
 #include<string.h>
 
+// CSR 寄存器相关
+void riscv_csr_init(riscv_t* riscv) {
+
+}
+
+// RISCV 相关
 riscv_t* riscv_create(void) {
     riscv_t* riscv = (riscv_t*)calloc(1, sizeof(riscv_t));    // 因为要求返回指针 所以分配一个空间就可以    32 + 32 + 32*32 / 144
     assert(riscv != NULL);  // 判断为 True 继续运行
@@ -62,6 +68,9 @@ void riscv_reset(riscv_t* riscv) {
 
     // 重新读写设备缓存
     riscv->dev_read_buffer = riscv->dev_write_buffer = riscv->device_list;
+
+    // 初始化 CSR 寄存器
+    riscv_csr_init(riscv);
 }
 
 // 添加不同外部设备
