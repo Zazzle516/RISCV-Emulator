@@ -1,4 +1,5 @@
 #include "instr_implements.h"
+// #include "csr.h"
 #include<stdlib.h>
 #include<assert.h>
 #include<stdio.h>
@@ -62,6 +63,9 @@ void riscv_reset(riscv_t* riscv) {
 
     // 重新读写设备缓存
     riscv->dev_read_buffer = riscv->dev_write_buffer = riscv->device_list;
+
+    // 初始化 CSR 寄存器设备
+    riscv_csr_init(riscv->csr_regs);
 }
 
 // 添加不同外部设备
@@ -380,6 +384,7 @@ void riscv_continue(riscv_t* riscv, int forever) {
         default:
             goto cond_end;
         }
+    
     } while (forever);
     return;
 

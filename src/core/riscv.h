@@ -4,6 +4,7 @@
 #include "core/types.h"
 #include "device/mem.h"
 #include "instr.h"
+#include "csr.h"
 
 #define RISCV_REG_NUM 32
 
@@ -27,6 +28,8 @@ typedef struct _riscv_t
     riscv_device_t* dev_read_buffer;
     riscv_device_t* dev_write_buffer;
     
+    // 添加 CSR 设备
+    csr_reg_t csr_regs;
 }riscv_t;
 
 /* 空间分配并且初始化 */

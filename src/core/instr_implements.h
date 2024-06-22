@@ -576,4 +576,7 @@ static inline void handle_remu(riscv_t* riscv) {
 
     riscv->pc += sizeof(riscv_word_t);
 }
+
+// CSR reg
+
 #endif /* INSTER_IMPL_H */
