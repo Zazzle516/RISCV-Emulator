@@ -90,6 +90,7 @@
 #define FUNC3_REM       0b110
 #define FUNC3_REMU      0b111
 
+#define FUNC3_EBREAK    0b000
 #define FUNC3_CSRRW     0b001
 #define FUNC3_CSRRS     0b010
 #define FUNC3_CSRRC     0b011

@@ -576,4 +576,18 @@ static inline void handle_remu(riscv_t* riscv) {
 
     riscv->pc += sizeof(riscv_word_t);
 }
+
+// CSR Operation
+static inline void handle_csrrw(riscv_t* riscv) {
+    // 读取 csr 到 reg-rd 中    同时把 reg-rs1 的值写入 csr 中
+    riscv_word_t csr_addr = riscv->instr.i.imm11_0;
+
+    riscv_word_t csr_content = riscv_read_csr(riscv, csr_addr);
+    riscv_word_t rs1_content = riscv_read_reg(riscv, riscv->instr.i.rs1);
+
+    riscv_write_csr(riscv, csr_addr, rs1_content);
+    riscv_write_reg(riscv, riscv->instr.i.rd, csr_content);
+
+    riscv->pc += sizeof(riscv_word_t);
+}
 #endif /* INSTER_IMPL_H */

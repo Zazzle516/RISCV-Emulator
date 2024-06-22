@@ -43,6 +43,8 @@ typedef struct _riscv_t
 
 // CSR 相关函数
 void riscv_csr_init(riscv_t* riscv);
+riscv_word_t riscv_read_csr(riscv_t* riscv, riscv_word_t addr);
+void riscv_write_csr(riscv_t* riscv, riscv_word_t addr, riscv_word_t val);
 
 /* 空间分配并且初始化 */
 riscv_t* riscv_create(void);

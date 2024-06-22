@@ -9,6 +9,15 @@ void riscv_csr_init(riscv_t* riscv) {
 
 }
 
+// CSR 寄存器读写
+riscv_word_t riscv_read_csr(riscv_t* riscv, riscv_word_t addr) {
+    return riscv->riscv_csr_regs.mscratch;
+}
+
+void riscv_write_csr(riscv_t* riscv, riscv_word_t addr, riscv_word_t val) {
+    riscv->riscv_csr_regs.mscratch = val;
+}
+
 // RISCV 相关
 riscv_t* riscv_create(void) {
     riscv_t* riscv = (riscv_t*)calloc(1, sizeof(riscv_t));    // 因为要求返回指针 所以分配一个空间就可以    32 + 32 + 32*32 / 144
@@ -118,9 +127,20 @@ void riscv_continue(riscv_t* riscv, int forever) {
 
         switch (riscv->instr.opcode)
         {
-        case OP_BREAK:
-            fprintf(stdout, "found ebreak!\n");
-            return;
+        case OP_BREAK: {
+            switch (riscv->instr.i.funct3)
+            {
+            case FUNC3_EBREAK:
+                fprintf(stdout, "found ebreak!\n");
+                return;
+            case FUNC3_CSRRW:
+                handle_csrrw(riscv);
+                break;
+            default:
+                goto cond_end;
+            }
+            break;
+        }
 
         case OP_ADDI: {
             switch (riscv->instr.i.funct3){
