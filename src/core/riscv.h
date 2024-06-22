@@ -8,7 +8,10 @@
 
 #define RISCV_REG_NUM 32
 
+// 前向声明结构体
+struct csr_reg_t;
 
+// 定义当前结构体
 typedef struct _riscv_t
 {
     riscv_word_t regs[RISCV_REG_NUM];       // 寄存器数组
@@ -29,7 +32,7 @@ typedef struct _riscv_t
     riscv_device_t* dev_write_buffer;
     
     // 添加 CSR 设备
-    csr_reg_t csr_regs;
+    csr_reg_t* csr_regs;
 }riscv_t;
 
 /* 空间分配并且初始化 */

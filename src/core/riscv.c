@@ -65,7 +65,7 @@ void riscv_reset(riscv_t* riscv) {
     riscv->dev_read_buffer = riscv->dev_write_buffer = riscv->device_list;
 
     // 初始化 CSR 寄存器设备
-    riscv_csr_init(riscv->csr_regs);
+    riscv_csr_init(riscv);
 }
 
 // 添加不同外部设备
@@ -113,9 +113,11 @@ void riscv_continue(riscv_t* riscv, int forever) {
 
         switch (riscv->instr.opcode)
         {
-        case OP_BREAK:
+        case OP_BREAK: {
+
             fprintf(stdout, "found ebreak!\n");
             return;
+        }
 
         case OP_ADDI: {
             switch (riscv->instr.i.funct3){
