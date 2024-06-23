@@ -585,8 +585,71 @@ static inline void handle_csrrw(riscv_t* riscv) {
     riscv_word_t csr_content = riscv_read_csr(riscv, csr_addr);
     riscv_word_t rs1_content = riscv_read_reg(riscv, riscv->instr.i.rs1);
 
-    riscv_write_csr(riscv, csr_addr, rs1_content);
     riscv_write_reg(riscv, riscv->instr.i.rd, csr_content);
+    riscv_write_csr(riscv, csr_addr, rs1_content);
+
+    riscv->pc += sizeof(riscv_word_t);
+}
+
+static inline void handle_csrrs(riscv_t* riscv) {
+    // 读取 csr 到 reg-rd 中    并根据 reg-rs1 的非零值将特定位的 csr 置 1
+    riscv_word_t csr_addr = riscv->instr.i.imm11_0;
+    
+    riscv_word_t csr_content = riscv_read_csr(riscv, csr_addr);
+    riscv_word_t rs1_content = riscv_read_reg(riscv, riscv->instr.i.rs1);
+
+    riscv_write_csr(riscv, csr_addr, csr_content | rs1_content);
+    riscv_write_reg(riscv, riscv->instr.i.rd, csr_content);
+
+    riscv->pc += sizeof(riscv_word_t);
+}
+
+static inline void handle_csrrc(riscv_t* riscv) {
+    // 读取 csr 到 reg-rd 中    并根据 reg-rs1 的非零值将特定位的 csr 置 0
+    riscv_word_t csr_addr = riscv->instr.i.imm11_0;
+    
+    riscv_word_t csr_content = riscv_read_csr(riscv, csr_addr);
+    riscv_word_t rs1_content = riscv_read_reg(riscv, riscv->instr.i.rs1);
+
+    riscv_write_csr(riscv, csr_addr, csr_content & ~rs1_content);
+    riscv_write_reg(riscv, riscv->instr.i.rd, csr_content);
+
+    riscv->pc += sizeof(riscv_word_t);
+}
+
+static inline void handle_csrrwi(riscv_t* riscv) {
+    // 先将 csr 写入 reg-rd    将立即数写入 csr
+    riscv_word_t csr_addr = riscv->instr.i.imm11_0;
+    riscv_word_t csr_content = riscv_read_csr(riscv, csr_addr);
+
+    riscv_word_t new_csr_content = riscv->instr.i.rs1;
+
+    riscv_write_reg(riscv, riscv->instr.i.rd, csr_content);
+    riscv_write_csr(riscv, csr_addr, new_csr_content);
+
+    riscv->pc += sizeof(riscv_word_t);
+}
+
+static inline void handle_csrrsi(riscv_t* riscv) {
+    riscv_word_t csr_addr = riscv->instr.i.imm11_0;
+    riscv_word_t csr_content = riscv_read_csr(riscv, csr_addr);
+
+    riscv_write_reg(riscv, riscv->instr.i.rd, csr_content);
+
+    riscv_word_t new_csr_content = riscv->instr.i.rs1;
+    riscv_write_csr(riscv, csr_addr, new_csr_content | csr_content);
+
+    riscv->pc += sizeof(riscv_word_t);
+}
+
+static inline void handle_csrrci(riscv_t* riscv) {
+    riscv_word_t csr_addr = riscv->instr.i.imm11_0;
+
+    riscv_word_t csr_content = riscv_read_csr(riscv, csr_addr);
+    riscv_word_t new_csr_content = riscv->instr.i.rs1;
+
+    riscv_write_reg(riscv, riscv->instr.i.rd, csr_content);
+    riscv_write_csr(riscv, csr_addr, csr_content & ~new_csr_content);
 
     riscv->pc += sizeof(riscv_word_t);
 }

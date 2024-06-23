@@ -795,7 +795,7 @@ void instr_test (riscv_t * riscv) {
         UNIT_TEST(test_riscv_csri),
    };
 
-    for (int i = 20; i < sizeof(tests)/sizeof(tests[0]); i++) {
+    for (int i = 0; i < sizeof(tests)/sizeof(tests[0]); i++) {
         printf("Run %s: ", tests[i].name);
         tests[i].test_func(riscv);
         printf("passed\n");

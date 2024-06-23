@@ -136,6 +136,21 @@ void riscv_continue(riscv_t* riscv, int forever) {
             case FUNC3_CSRRW:
                 handle_csrrw(riscv);
                 break;
+            case FUNC3_CSRRS:
+                handle_csrrs(riscv);
+                break;
+            case FUNC3_CSRRC:
+                handle_csrrc(riscv);
+                break;
+            case FUNC3_CSRRWI:
+                handle_csrrwi(riscv);
+                break;
+            case FUNC3_CSRRSI:
+                handle_csrrsi(riscv);
+                break;
+            case FUNC3_CSRRCI:
+                handle_csrrci(riscv);
+                break;
             default:
                 goto cond_end;
             }
