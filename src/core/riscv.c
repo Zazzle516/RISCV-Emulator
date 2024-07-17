@@ -288,7 +288,10 @@ void riscv_continue(riscv_t* riscv, int forever) {
                         handle_divu(riscv);
                         break;
                     case FUNC7_ADD:
-                        handle_srl_sra(riscv);
+                        handle_srl(riscv);
+                        break;
+                    case FUNC7_SRA:
+                        handle_sra(riscv);
                         break;
                     default:
                         goto cond_end;

@@ -182,6 +182,8 @@ static inline void handle_srl(riscv_t* riscv) {
 
     riscv_word_t result = source1 >> shamt;
     riscv_write_reg(riscv, riscv->instr.r.rd, result);
+
+    riscv->pc += sizeof(riscv_word_t);
 }
 
 static inline void handle_sra(riscv_t* riscv) {
@@ -203,19 +205,10 @@ static inline void handle_sra(riscv_t* riscv) {
         riscv_word_t result = source1 >> shamt;
         riscv_write_reg(riscv, riscv->instr.r.rd, result);
     }
-}
-
-static inline void handle_srl_sra(riscv_t* riscv) {
-    riscv_word_t flag = riscv->instr.r.funct7;
-    if (flag > 0) {
-        handle_sra(riscv);
-    }
-    else {
-        handle_srl(riscv);
-    }
 
     riscv->pc += sizeof(riscv_word_t);
 }
+
 
 static inline void handle_or(riscv_t* riscv) {
     // 对两个寄存器中的数或运算
