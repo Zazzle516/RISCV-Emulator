@@ -7,8 +7,9 @@
 
 // 模拟器的概念: 运行的是一个大型程序 只是模拟了 RISCV 的行为 所有调用的相关变量和物理资源都是我自己的电脑
 
-#include "core/riscv.h"
-#include "device/mem.h"
+// Tip: 尽量不要使用 VSCode 提供的 build 工具   而是直接使用 CLI-cmake 不然缓存不会被更新
+// 会反复的出现 LNK2019 的报错  删掉 build-folder 重新构建
+#include "core/instr_implements.h"
 #include "test/instr_test.h"
 
 // 定义命令行参数的语法
@@ -17,8 +18,11 @@ static void print_help_info(const char* file_name) {
     fprintf(stderr,
         "usage: %s [options] <elf file>\n"
         "-help              | print help info\n"
+        "-test              | instructions unit tests\n"
+        "-debug port        | run step by step and it is optional to define your debug info port\n"
         "-ram start:size    | set start addres of RAM and size\n"
         "-flash start:size  | set start address of Flash and size\n"
+        "-info              | print debug info on terminal\n"
         ,file_name
     );
 }
@@ -51,6 +55,10 @@ int main(int argc, char** argv) {
     // 用户是否使用自定义参数的标志
     int ram_define_flag = 0;
     int flash_define_flag = 0;
+    int run_test_flag = 0;
+    int default_debug_port = 1234;
+    int debug_mode = 0;                 // 默认不开启
+    int print_debug_info = 1;
 
     while(arg_index < argc) {
         char* currArg = argv[arg_index++];
@@ -89,7 +97,7 @@ int main(int argc, char** argv) {
             char* flash_args = argv[arg_index++];
             arg_check(flash_args);
 
-            char* flash_define = strtok(flash_args, NULL, ":");
+            char* flash_define = strtok(flash_args, ":");
             uint32_t flash_start_addr = strtoul(flash_define, NULL, 16);
             flash_define = strtok(NULL, ":");
             uint32_t flash_size = strtoul(flash_define, NULL, 16);
@@ -97,7 +105,7 @@ int main(int argc, char** argv) {
             mem_t* myMemory = mem_create("flash", RISCV_MEM_ATTR_READABLE, flash_start_addr, flash_size);
             riscv_device_add(myRiscv, (riscv_device_t*) myMemory);
             riscv_flash_set(myRiscv, myMemory);
-            
+
             flash_define_flag = 1;
         }
 
@@ -106,8 +114,24 @@ int main(int argc, char** argv) {
             exit(0);
         }
 
-        if (strcmp(currArg, "-port") == 0) {
+        if (strcmp(currArg, "-test") == 0) {
+            // 避免直接执行程序 可能还有 -ram / -flash 参数未定义
+            run_test_flag = 1;
+        }
 
+        if (strcmp(currArg, "-debug") == 0) {
+            // 只有要求以 debug 方式编译的时候才保存 gdb 信息 提高效率
+            // 用户自定义端口只有处于 debug 状态的时候才有意义  所以把 port 定义在里面
+            char* option_port = argv[arg_index++];
+            if (option_port) {
+                // 如果用户自定义端口号存在的话
+                default_debug_port = strtoul(option_port, NULL, 10);
+            }
+            debug_mode = 1;
+        }
+
+        if (strcmp(currArg, "-info") == 0) {
+            print_debug_info = 1;
         }
     }
 
@@ -126,14 +150,26 @@ int main(int argc, char** argv) {
         riscv_flash_set(myRiscv, myMemory);
     }
 
-
     // 读取 image.bin 文件到 Flash 空间
     // flash_load_bin(myRiscv, "./unit/ebreak/obj/image.bin");
     // riscv_reset(myRiscv);
     // fprintf(stdout, "myRiscv has reset with pc = %d", myRiscv->pc);
 
     // 代码框架实际给了完整的测试用例 可以不用自己手动写
-    instr_test(myRiscv);    // 会自己去调用 test_riscv_instr()
+    if (run_test_flag) {
+        instr_test(myRiscv);    // 会自己去调用 test_riscv_instr()
+    }
 
+    // 根据模式定义判断是否以 debug 模式启动
+    if (debug_mode) {
+        gdb_server_t* gdb_server = gdb_server_create(myRiscv, default_debug_port, print_debug_info);
+
+        // 打印成功提示信息
+        printf("gdb is now running on port: %d\n", default_debug_port);
+        myRiscv->gdb_server = gdb_server;
+    }
+
+    riscv_run(myRiscv);
+    
     return 0;
 }

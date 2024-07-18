@@ -481,3 +481,18 @@ int riscv_mem_write(riscv_t* riscv, riscv_word_t start_addr, uint8_t* val, int w
     riscv->dev_write_buffer = targetDevice;
     return targetDevice->write(targetDevice, start_addr, val, width);
 }
+
+// 模拟器运行主体
+void riscv_run(riscv_t* riscv) {
+    // 参考 instr_test 的执行流程
+    
+    // 复位内核
+    riscv_reset(riscv);
+
+    if (riscv->gdb_server) {
+        gdb_server_run(riscv->gdb_server);
+    }
+    else {
+        riscv_continue(riscv, 1);
+    }
+}

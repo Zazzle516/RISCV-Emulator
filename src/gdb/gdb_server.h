@@ -3,6 +3,8 @@
 
 #include <stdio.h>
 
+#include "plat/plat.h"
+
 // 避免头文件嵌套 使用前向定义
 struct _riscv_t;
 
@@ -17,10 +19,16 @@ struct _riscv_t;
 typedef struct _gdb_server_t
 {
     struct _riscv_t* riscv;     // 声明该 gdb_server 所属的 riscv 对象
+
+    int debug_info;
+
+    socket_t gdb_socket;
 }gdb_server_t;
 
 // 定义 gdb_server 的创建
 // debug_info: 是否在 terminal 打印 debug 信息
 gdb_server_t* gdb_server_create(struct _riscv_t* riscv, int gdb_port, int debug_info);
+
+void gdb_server_run(gdb_server_t* gbd_server);
 
 #endif /* GDN_SERVER_H */

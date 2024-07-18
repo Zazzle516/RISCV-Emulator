@@ -1,9 +1,9 @@
 #ifndef RISCV_H
 #define RISCV_H
 
-#include "core/types.h"
 #include "device/mem.h"
 #include "instr.h"
+#include "gdb/gdb_server.h"
 
 #define RISCV_REG_NUM 32
 
@@ -38,6 +38,9 @@ typedef struct _riscv_t
 
     // 定义 CSR 寄存器
     riscv_csr_t riscv_csr_regs;
+
+    // 定义使用的 gdb 对象
+    gdb_server_t* gdb_server;
     
 }riscv_t;
 
@@ -83,5 +86,7 @@ int riscv_mem_write(riscv_t* riscv, riscv_word_t start_addr, uint8_t* val, int w
 
 // 增加对不同存储设备的添加支持
 void riscv_device_add(riscv_t* riscv, riscv_device_t* dev);
+
+void riscv_run(riscv_t* riscv);
 
 #endif /* RISCV_H */
