@@ -58,7 +58,7 @@ int main(int argc, char** argv) {
     int run_test_flag = 0;
     int default_debug_port = 1234;
     int debug_mode = 0;                 // 默认不开启
-    int print_debug_info = 1;
+    int print_debug_info = 0;
 
     while(arg_index < argc) {
         char* currArg = argv[arg_index++];

@@ -34,6 +34,29 @@ static uint8_t _str_to_hex(const char* input) {
     return num;
 }
 
+
+/* 对通信数据包进行日志记录 */
+static void print_packet_log(gdb_server_t* gdb_server, int received, char* msg) {
+    if (gdb_server->debug_info) {
+        char time_buffer[80];
+        time_t raw_time;
+        time(&raw_time);
+        struct tm* time_info = localtime(&raw_time);
+        strftime(time_buffer, sizeof(time_buffer), "%Y-%m-%d %H:%M:%S", time_info);
+        
+        if (received) {
+            // 对接收的数据包输出
+            printf("%s-<$: %s\n", time_buffer, debug_info_buffer);
+        }
+        else {
+            // 对发送的数据包输出
+            printf("%s->$: %s\n", time_buffer, msg);
+        }
+    }
+}
+
+/* 解析 client 发送的数据包 */
+
 static char _read_starter_char(gdb_server_t* gdb_server, char curr) {
     // flags: 以默认方式接收不进行任何特殊处理
     recv(gdb_server->gdb_client, &curr, 1, 0);
@@ -81,6 +104,9 @@ static char _read_command_char(gdb_server_t* gdb_server) {
             break;
         }
 
+        // 根据 command 更新 checksum   (注意在转义之前计算)
+        checksum += curr;
+
         if (curr == GDB_ESCAPE) {
             // 对转义字符的处理     '}#^0x20'
             recv(gdb_server->gdb_client, &curr, 1, 0);  // 读入下一个字符
@@ -89,9 +115,6 @@ static char _read_command_char(gdb_server_t* gdb_server) {
         
         // 读取 command 有效数据
         debug_info_buffer[curr_index++] = curr;
-
-        // 根据 command 更新 checksum
-        checksum += curr;
     }
 
     // 读取到 checksum 标记结束循环
@@ -149,6 +172,71 @@ close:
     return EOF;
 }
 
+/* 生成 server 发送的数据包 */
+
+// 根据数据包格式打包
+static int gdb_write_packet(gdb_server_t* gdb_server, char* msg) {
+    char reply_buffer[DEBUG_INFO_BUFFER_SIZE];
+    int reply_buffer_index = 0;
+    char checksum_hex[4] = {0};     // 字符类型的校验和
+    uint8_t write_checksum = 0;
+
+    // 定义起始符号
+    reply_buffer[reply_buffer_index++] = '$';
+    for(char* ptr = msg; *ptr; ptr++) {
+        char c = *ptr;
+
+        // 对转义字符进行一个额外的处理
+        if (c == '#' || c == '$' || c == '*' || c == '}') {
+            reply_buffer[reply_buffer_index++] = GDB_ESCAPE;
+            c ^= 0x20;
+            write_checksum += GDB_ESCAPE;
+        }
+        reply_buffer[reply_buffer_index++] = c;
+        write_checksum += c;
+    }
+
+    // 写入校验和
+    // char *const _Buffer: 目标缓冲区
+    // size_t size: 表示缓冲区大小  包括终止符 '\0'
+    // 格式化字符串并将其写入到一个缓冲区中
+    snprintf(reply_buffer + reply_buffer_index, sizeof(write_checksum), "#%02x", write_checksum);
+
+    // 发送数据包
+    send(gdb_server->gdb_client, reply_buffer, (int) strlen(reply_buffer), 0);
+
+    // 日志打印
+    print_packet_log(gdb_server, 0, msg);
+
+    // 检查对方是否正确接收 (会返回一个 '+')
+    char curr = EOF;
+    // curr = _read_starter_char(gdb_server->gdb_client, curr);
+    // 因为 curr 会在 _read_starter_char 初始化 所以这里没办法用 _read_starter_char() 处理
+
+    recv(gdb_server->gdb_client, &curr, 1, 0);
+    RETURN_IF_MSG(curr == EOF, err, "client failed to receive your msg\n");
+    
+    // 没有正确接收重新发送
+    if (curr != '+') {
+        RETURN_IF_MSG(curr == EOF, err, "client failed to receive your msg correctly, now retry..\n");
+        // 实际上因为项目在本机上而且是 TCP 连接不太可能发生丢包错误
+        // 如果是校验码的错误也不会因为重新发包而解决
+        // 所以这里只写了框架没有进一步的处理
+        goto err;
+    }
+
+    if (curr == '+') {
+        return 0;
+    }
+err:
+    return -1;
+}
+
+static int gdb_write_unsupport(gdb_server_t* gdb_server) {
+    // 不支持命令回复       直接返回空字符串
+    return gdb_write_packet(gdb_server, "");
+}
+
 // 解析 client-socket 发来的数据包内容
 static char* gdb_read_packet(gdb_server_t* gdb_server) {
     // 从结构上可以视为三个部分: start_label(+$) + command + '#' + checksum
@@ -174,17 +262,10 @@ static char* gdb_read_packet(gdb_server_t* gdb_server) {
                 break;
             }
         }
-
-        // 处理完一条完整的语句后输出对应信息
-        if (gdb_server->debug_info) {
-            char time_buffer[80];
-            time_t raw_time;
-            time(&raw_time);
-            struct tm* time_info = localtime(&raw_time);
-            strftime(time_buffer, sizeof(time_buffer), "%Y-%m-%d %H:%M:%S", time_info);
-            printf("%s->$: %s\n", time_buffer, debug_info_buffer);
-        }
     }
+
+    // 日志打印
+    print_packet_log(gdb_server, 1, "");
 
     // 已经读取一个完整数据包   返回解析字符串
     return debug_info_buffer;
@@ -262,6 +343,9 @@ static void handle_connection(gdb_server_t* gdb_server) {
     // 读取 client 发来的数据包     根据 Remote Serial Protocol 的格式进行解析 (就是词法分析确信)
     while ((packet_data = gdb_read_packet(gdb_server)) != NULL) {
         // 根据 packet_data 的读取结果进行一些反应
+
+        // 但目前就是 也不知道回啥  所以无论是任何命令 都回复不支持 当然后面要改
+        gdb_write_unsupport(gdb_server);
     }
 
 }
