@@ -170,6 +170,6 @@ int main(int argc, char** argv) {
     }
 
     riscv_run(myRiscv);
-    
+
     return 0;
 }

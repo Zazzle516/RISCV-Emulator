@@ -5,6 +5,9 @@
 
 #include "plat/plat.h"
 
+#define DEBUG_INFO_BUFFER_SIZE          (30 * 1024)
+#define GDB_ESCAPE                      '}'
+
 // 避免头文件嵌套 使用前向定义
 struct _riscv_t;
 
@@ -22,7 +25,9 @@ typedef struct _gdb_server_t
 
     int debug_info;
 
-    socket_t gdb_socket;
+    socket_t gdb_socket;        // 监听端口
+    socket_t gdb_client;        // 通信端口     因为当前的环境只有一个 client 如果是多个可能用数组链表之类的
+
 }gdb_server_t;
 
 // 定义 gdb_server 的创建

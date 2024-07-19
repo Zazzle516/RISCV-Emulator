@@ -1,11 +1,197 @@
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
+#include <time.h>
 
 #include "core/riscv.h"
 #include "plat/plat.h"          // 包含对应环境中的 BSD Socket 初始化
 
-// Q: 网络字节序与主机字节序的区别
+// 定义 command 全局缓存
+static char debug_info_buffer[DEBUG_INFO_BUFFER_SIZE];      // 全部初始化为 0
 
+// 定义 command-checksum
+static uint8_t checksum = 0;
+
+static char _char_to_hex(char c) {
+    if ((c >= '0') && (c <= '9'))
+        return c - '0';
+    if ((c >= 'a') && (c <= 'f'))
+        return c - 'a' + 10;
+    if ((c >= 'A') && (c <= 'F'))
+        return c - 'A' + 10;
+    return 0;
+}
+
+// 辅助函数 把 checksum-str 转换为 checksum-num
+static uint8_t _str_to_hex(const char* input) {
+    uint8_t num = 0;
+
+    char c;
+    while ((c = *input++) != '\0') {
+        num = (num << 4) | _char_to_hex(c); 
+    }
+
+    return num;
+}
+
+static char _read_starter_char(gdb_server_t* gdb_server, char curr) {
+    // flags: 以默认方式接收不进行任何特殊处理
+    recv(gdb_server->gdb_client, &curr, 1, 0);
+    if (curr == EOF) {
+        // 没有读到任何数据
+        fprintf(stderr, "connection closed by client\n");
+        goto close;
+    }
+
+    if (curr == '+') {
+        // 成功收到数据
+        fprintf(stdout, "successfully received data from client!\n");
+        curr = EOF;
+        return _read_starter_char(gdb_server, curr);
+    }
+
+    if (curr == '$') {
+        // 成功找到 start_label 返回
+        return curr;
+    }
+
+close:
+    return EOF;
+}
+
+static char _read_command_char(gdb_server_t* gdb_server) {
+    int curr_index = 0;
+    char curr = EOF;
+    while(1) {
+        if (curr_index > DEBUG_INFO_BUFFER_SIZE) {
+            fprintf(stderr, "data oversize\n");
+            goto close;
+        }
+
+        curr = EOF;
+        recv(gdb_server->gdb_client, &curr, 1, 0);
+
+        if (curr == EOF) {
+            fprintf(stderr, "connection closed by client\n");
+            goto close;
+        }
+
+        if (curr == '#') {
+            // 判断是否读取到 checksum 段
+            break;
+        }
+
+        if (curr == GDB_ESCAPE) {
+            // 对转义字符的处理     '}#^0x20'
+            recv(gdb_server->gdb_client, &curr, 1, 0);  // 读入下一个字符
+            curr = curr ^ 0x20;
+        }
+        
+        // 读取 command 有效数据
+        debug_info_buffer[curr_index++] = curr;
+
+        // 根据 command 更新 checksum
+        checksum += curr;
+    }
+
+    // 读取到 checksum 标记结束循环
+    debug_info_buffer[curr_index] = '\0';       // 定义为一个完整字符串
+    return curr;
+
+close:
+    return EOF;
+}
+
+static char _read_checksum_char(gdb_server_t* gdb_server) {
+    // 类似于 "#ca" 这样 两位 16 进制字符
+    
+    // 接收读取的 checksum
+    char read_checksum_str[3] = {0};
+    uint8_t read_checksum_num = 0;
+
+    char curr = EOF;
+
+    // 以字符的方式读取两位
+    for (int i = 0; i < 2; i++) {
+        curr = EOF;
+        recv(gdb_server->gdb_client, &curr, 1, 0);
+
+        if (curr == EOF) {
+            fprintf(stderr, "connection closed by client\n");
+            goto close;
+        }
+
+        read_checksum_str[i] = curr;
+    }
+
+    // 将字符结果转换为数字
+    read_checksum_num = _str_to_hex(read_checksum_str);
+
+    // 判断 checksum 的合法性
+    if (read_checksum_num != checksum) {
+        if (gdb_server->debug_info) {
+            printf("-> %s\n", debug_info_buffer);
+        }
+
+        fprintf(stderr, "checksum failed\n");
+
+        // 通知客户端请求重新发送
+        send(gdb_server->gdb_client, "-", 1, 0);
+    }
+    else {
+        // 通知客户端接收成功
+        send(gdb_server->gdb_client, "+", 1, 0);
+        curr = '0';
+    }
+    return curr;
+
+close:
+    return EOF;
+}
+
+// 解析 client-socket 发来的数据包内容
+static char* gdb_read_packet(gdb_server_t* gdb_server) {
+    // 从结构上可以视为三个部分: start_label(+$) + command + '#' + checksum
+    // Tip: command 区域包含对 '#' 的转义处理   '}#^0x20'   通过 EOF 判断结束
+    
+    
+    // 因为数据是以字符串的方式传入的 所以定义一个单字符来判断当下读取的字符
+    char debug_info_current = EOF;
+
+    while(1) {
+        // 对 start_label 的处理
+        debug_info_current = _read_starter_char(gdb_server, debug_info_current);
+
+        // 对 command 的处理
+        if (debug_info_current != EOF) {
+            debug_info_current = _read_command_char(gdb_server);
+        }
+
+        // 对 checksum 的处理
+        if (debug_info_current == '#') {
+            debug_info_current = _read_checksum_char(gdb_server);
+            if (debug_info_current == '0') {
+                break;
+            }
+        }
+
+        // 处理完一条完整的语句后输出对应信息
+        if (gdb_server->debug_info) {
+            char time_buffer[80];
+            time_t raw_time;
+            time(&raw_time);
+            struct tm* time_info = localtime(&raw_time);
+            strftime(time_buffer, sizeof(time_buffer), "%Y-%m-%d %H:%M:%S", time_info);
+            printf("%s->$: %s\n", time_buffer, debug_info_buffer);
+        }
+    }
+
+    // 已经读取一个完整数据包   返回解析字符串
+    return debug_info_buffer;
+}
+
+
+// 定义服务器的监听端口
 gdb_server_t* gdb_server_create(struct _riscv_t* riscv, int gdb_port, int debug_info) {
     gdb_server_t* gdb_server = (gdb_server_t*) calloc(1, sizeof(gdb_server_t));
     RETURN_IF_MSG(gdb_server == NULL, err, "gdb_server create failed");
@@ -15,12 +201,12 @@ gdb_server_t* gdb_server_create(struct _riscv_t* riscv, int gdb_port, int debug_
     // SOCK_STREAM: 默认使用流式传输
     // protocol: 0 让系统选择合适的协议(在选择了 AF_INET 和 SOCK_STREAM 的情况下默认是 IPPROTO_TCP )
     socket_t gdb_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    RETURN_IF_MSG(gdb_socket == NULL, err, strerror(errno))
+    RETURN_IF_MSG(gdb_socket == -1, err, strerror(errno))
 
     // 在多次连续启动时 声明复用上一次的端口
     int reuse = 1;
     int rc = setsockopt(gdb_socket, SOL_SOCKET, SO_REUSEADDR, (void*) &reuse, sizeof(reuse));
-    RETURN_IF_MSG(gdb_socket == NULL, err, strerror(errno))
+    RETURN_IF_MSG(rc < 0, err, strerror(errno))
 
     // 2. 绑定套接字
     struct sockaddr_in sockaddr;            // socketaddr_in 为 IpV4 设计的 socket 地址结构
@@ -52,12 +238,31 @@ err:
 }
 
 // 等待前端的连接请求并建议连接
-static void gdb_client_wait(gdb_server_t* gbd_server) {
+static void gdb_client_wait(gdb_server_t* gdb_server) {
+    struct sockaddr_in client_addr;
+    int clinet_addr_size = sizeof(client_addr);
 
+    // 得到与 client 的通信端口
+    socket_t client_socket = accept(gdb_server->gdb_socket, (struct sockaddr*) &client_addr, &clinet_addr_size);
+    // 同时监听端口不会被占用   可能有其他 client 发来连接请求  防止冲突
+
+    RETURN_IF_MSG(client_socket == INVALID_SOCKET, err, strerror(errno))
+
+    gdb_server->gdb_client = client_socket;     // 后续对 image.bin 文件的操作都通过 client_socket 进行
+
+    return;
+err:
+    exit(-1);
 }
 
 // 通过 gdb 实现 run by step
-static void handle_connection(gdb_server_t* gbd_server) {
+static void handle_connection(gdb_server_t* gdb_server) {
+    char* packet_data;
+
+    // 读取 client 发来的数据包     根据 Remote Serial Protocol 的格式进行解析 (就是词法分析确信)
+    while ((packet_data = gdb_read_packet(gdb_server)) != NULL) {
+        // 根据 packet_data 的读取结果进行一些反应
+    }
 
 }
 
