@@ -28,6 +28,7 @@ typedef struct _gdb_server_t
     socket_t gdb_socket;        // 监听端口
     socket_t gdb_client;        // 通信端口     因为当前的环境只有一个 client 如果是多个可能用数组链表之类的
 
+    char gdb_send_buffer[DEBUG_INFO_BUFFER_SIZE];       // 发送缓存
 }gdb_server_t;
 
 // 定义 gdb_server 的创建
