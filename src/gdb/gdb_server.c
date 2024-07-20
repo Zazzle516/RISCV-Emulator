@@ -10,9 +10,6 @@
 // 定义 command 全局缓存
 static char debug_info_buffer[DEBUG_INFO_BUFFER_SIZE];      // 全部初始化为 0
 
-// 定义 command-checksum
-static uint8_t checksum = 0;
-
 /* 芯片模拟默认小端方式 */
 
 /* 辅助函数 */
@@ -108,7 +105,7 @@ close:
     return EOF;
 }
 
-static char _read_command_char(gdb_server_t* gdb_server) {
+static uint8_t _read_command_char(gdb_server_t* gdb_server, uint8_t checksum) {
     int curr_index = 0;
     char curr = EOF;
     while(1) {
@@ -146,13 +143,13 @@ static char _read_command_char(gdb_server_t* gdb_server) {
 
     // 读取到 checksum 标记结束循环
     debug_info_buffer[curr_index] = '\0';       // 定义为一个完整字符串
-    return curr;
+    return checksum;
 
 close:
     return EOF;
 }
 
-static char _read_checksum_char(gdb_server_t* gdb_server) {
+static char _read_checksum_char(gdb_server_t* gdb_server, uint8_t checksum) {
     // 类似于 "#ca" 这样 两位 16 进制字符
     
     // 接收读取的 checksum
@@ -207,23 +204,26 @@ static char* gdb_read_packet(gdb_server_t* gdb_server) {
     
     // 因为数据是以字符串的方式传入的 所以定义一个单字符来判断当下读取的字符
     char debug_info_current = EOF;
+    
 
     while(1) {
+        // 初始化每条通讯的 checksum
+        uint8_t checksum = 0;
+
         // 对 start_label 的处理
         debug_info_current = _read_starter_char(gdb_server, debug_info_current);
 
         // 对 command 的处理
         if (debug_info_current != EOF) {
-            debug_info_current = _read_command_char(gdb_server);
+            checksum = _read_command_char(gdb_server, checksum);
         }
 
         // 对 checksum 的处理
-        if (debug_info_current == '#') {
-            debug_info_current = _read_checksum_char(gdb_server);
-            if (debug_info_current == '0') {
-                break;
-            }
+        debug_info_current = _read_checksum_char(gdb_server, checksum);
+        if (debug_info_current == '0') {
+            break;
         }
+        
     }
 
     // 日志打印
@@ -252,19 +252,19 @@ static int gdb_write_packet(gdb_server_t* gdb_server, char* msg) {
         // 对转义字符进行一个额外的处理
         if (c == '#' || c == '$' || c == '*' || c == '}') {
             reply_buffer[reply_buffer_index++] = GDB_ESCAPE;
-            c ^= 0x20;
+            *ptr ^= 0x20;
             write_checksum += GDB_ESCAPE;
         }
         reply_buffer[reply_buffer_index++] = c;
-        write_checksum += c;
+        write_checksum += *ptr;
     }
 
-    // 写入校验和
+    // 写入字符形式的校验和
     // char *const _Buffer: 目标缓冲区
     // size_t size: 表示缓冲区大小  包括终止符 '\0'
     // format: (#) 使用替代形式 针对 '%x' / '%X' 的添加 0x / 0X   (%) 每个格式说明符都以 '%' 开始    (0) 零填充   (2) 指定宽度   (x) 十六进制输出整数
     // 格式化字符串并将其写入到一个缓冲区中
-    snprintf(reply_buffer + reply_buffer_index, sizeof(write_checksum), "#%02x", write_checksum);
+    snprintf(reply_buffer + reply_buffer_index, sizeof(checksum_hex), "#%02x", write_checksum);
 
     // 发送数据包
     send(gdb_server->gdb_client, reply_buffer, (int) strlen(reply_buffer), 0);
@@ -533,8 +533,6 @@ static void handle_connection(gdb_server_t* gdb_server) {
                 gdb_write_unsupport(gdb_server);
                 break;
         }
-        // -q: are general query packets    期望获取支持调试功能    gdb_p808
-
     }
 
 }
