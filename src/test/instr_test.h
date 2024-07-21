@@ -2,7 +2,6 @@
 #define INSTR_TEST_H
 
 #include "plat/plat.h"
-#include <stdio.h>
 
 #define PATH_PRE    "./unit/"
 
@@ -15,7 +14,7 @@
 static void run_to_ebreak (riscv_t * riscv) {
     while (1) {
         riscv_word_t pc = riscv->pc;
-        riscv_continue(riscv, 1);
+        riscv_continue(riscv, 0);
         if (riscv->instr.raw == EBREAK) {
             break;
         }
@@ -187,7 +186,6 @@ static void test_riscv_andi (riscv_t * riscv) {
 
     check_reg(riscv, reglist, 32);
 }
-
 static void test_riscv_slti (riscv_t * riscv) {
     riscv_load_bin(riscv, PATH_PRE"07_slti/obj/image.bin");
 
@@ -382,6 +380,7 @@ static void test_riscv_srl (riscv_t * riscv) {
     check_reg(riscv, reglist, 32);
 }
 
+
 static void test_riscv_sra (riscv_t * riscv) {
     riscv_load_bin(riscv, PATH_PRE"16_sra/obj/image.bin");
 
@@ -438,7 +437,7 @@ static void test_riscv_sb (riscv_t * riscv) {
     // 读取内存内容并验证
     riscv_word_t content;
     riscv_mem_read(riscv, 0x20000000, (uint8_t *)&content, sizeof(riscv_word_t));
-    // assert_int_equal(content, 0xb3b2b1b0);      // fail??
+    assert_int_equal(content, 0xb3b2b1b0);
     riscv_mem_read(riscv, 0x20000014, (uint8_t *)&content, sizeof(riscv_word_t));
     assert_int_equal(content, 0x23451234);
     riscv_mem_read(riscv, 0x20000018, (uint8_t *)&content, sizeof(riscv_word_t));
@@ -570,7 +569,7 @@ static void test_riscv_jalr (riscv_t * riscv) {
     // 复位内核
     riscv_reset(riscv);
 
-    // 通过 forever = 0 进行单步调试，观察其运行流程
+    // 单步调试，观察其运行流程
     riscv_continue(riscv, 0);
     riscv_continue(riscv, 0);
     riscv_continue(riscv, 0);
@@ -767,7 +766,7 @@ void instr_test (riscv_t * riscv) {
         UNIT_TEST(test_riscv_andi),
         UNIT_TEST(test_riscv_slti),
         UNIT_TEST(test_riscv_sltiu),
-        UNIT_TEST(test_riscv_xori),     // 10
+        UNIT_TEST(test_riscv_xori),
         UNIT_TEST(test_riscv_sub),
         UNIT_TEST(test_riscv_sll),
         UNIT_TEST(test_riscv_slt),
@@ -777,7 +776,7 @@ void instr_test (riscv_t * riscv) {
         UNIT_TEST(test_riscv_sra),
         UNIT_TEST(test_riscv_or),
         UNIT_TEST(test_riscv_lui),
-        UNIT_TEST(test_riscv_sb),       // 20
+        UNIT_TEST(test_riscv_sb),
         UNIT_TEST(test_riscv_lb),
         UNIT_TEST(test_riscv_auipc),
         UNIT_TEST(test_riscv_and),
@@ -795,7 +794,7 @@ void instr_test (riscv_t * riscv) {
         UNIT_TEST(test_riscv_csri),
    };
 
-    for (int i = 1; i < sizeof(tests)/sizeof(tests[0]); i++) {
+    for (int i = 0; i < sizeof(tests)/sizeof(tests[0]); i++) {
         printf("Run %s: ", tests[i].name);
         tests[i].test_func(riscv);
         printf("passed\n");

@@ -1,9 +1,9 @@
-#ifndef INSTR_H
-#define INSTR_H
-#include "types.h"
-// 因为 instr_test.h 中调用了 riscv->instr 结构体
+#ifndef ISA_TYPES_H
+#define ISA_TYPES_H
 
-// 复制粘贴一下指令信息
+#include "types.h"
+
+#define OP_BREAK   0b1110011
 #define OP_LUI     0b0110111
 #define OP_AUIPC   0b0010111
 #define OP_JAL     0b1101111
@@ -90,7 +90,6 @@
 #define FUNC3_REM       0b110
 #define FUNC3_REMU      0b111
 
-#define FUNC3_EBREAK    0b000
 #define FUNC3_CSRRW     0b001
 #define FUNC3_CSRRS     0b010
 #define FUNC3_CSRRC     0b011
@@ -108,20 +107,19 @@
 #define FUNC7_REM       0b0000001
 #define FUNC7_MRET      0b0011000
 
-#define EBREAK 0b00000000000100000000000001110011
-#define OP_BREAK 0b1110011
+#define EBREAK   0b00000000000100000000000001110011  // breakpoint instr
 
-typedef union _instr_t
-{
-    // common 单独的 OPCODE 特化分类
+/**
+ * RISC-V instruction format
+ */
+typedef union _instr_t {
+    // common
     struct {
         riscv_word_t opcode : 7;
         riscv_word_t other : 25;
     };
 
-    // 字节读取是有顺序的 目前看是小端序的
-
-    // R-Type
+    // R-type
     struct {
         riscv_word_t opcode : 7;
         riscv_word_t rd : 5;
@@ -131,14 +129,8 @@ typedef union _instr_t
         riscv_word_t funct7 : 7;
     } r;
 
-    // I-Type
+    // I-type
     struct {
-        // riscv_word_t imm11_0 : 12;
-        // riscv_word_t rs1 : 5;
-        // riscv_word_t funct3 : 3;
-        // riscv_word_t rd : 5;
-        // riscv_word_t opcode : 7;
-
         riscv_word_t opcode : 7;
         riscv_word_t rd : 5;
         riscv_word_t funct3 : 3;
@@ -146,7 +138,7 @@ typedef union _instr_t
         riscv_word_t imm11_0 : 12;
     } i;
 
-    // S-Type
+    // S-type
     struct {
         riscv_word_t opcode : 7;
         riscv_word_t imm4_0 : 5;
@@ -156,7 +148,7 @@ typedef union _instr_t
         riscv_word_t imm11_5 : 7;
     } s;
 
-    // B-Type
+    // B-type
     struct {
         riscv_word_t opcode : 7;
         riscv_word_t imm_11 : 1;
@@ -168,14 +160,14 @@ typedef union _instr_t
         riscv_word_t imm_12 : 1;
     } b;
 
-    // U-Type
+    // U-type
     struct {
         riscv_word_t opcode : 7;
         riscv_word_t rd  : 5;
         riscv_word_t imm31_12 : 20;
     } u;
 
-    // J-Type
+    // J-type
     struct {
         riscv_word_t opcode : 7;
         riscv_word_t rd : 5;
@@ -186,6 +178,6 @@ typedef union _instr_t
     } j;
 
     riscv_word_t raw;
-}instr_t;
+} instr_t;
 
-#endif /* INSTR_H */
+#endif 

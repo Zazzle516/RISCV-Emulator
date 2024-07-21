@@ -1,553 +1,557 @@
+﻿#include <stdint.h>
 #include <stdlib.h>
-#include <string.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <time.h>
-
 #include "core/riscv.h"
-#include "plat/plat.h"          // 包含对应环境中的 BSD Socket 初始化
+#include "gdb_server.h"
+#include "plat/plat.h"
 
-// 定义 command 全局缓存
-static char debug_info_buffer[DEBUG_INFO_BUFFER_SIZE];      // 全部初始化为 0
+static char request[GDB_PACKET_SIZE];
 
-/* 芯片模拟默认小端方式 */
-
-/* 辅助函数 */
-
-// 把 checksum-str 转换为 checksum-num
-static char _char_to_hex(char c) {
-    if ((c >= '0') && (c <= '9'))
-        return c - '0';
-    if ((c >= 'a') && (c <= 'f'))
-        return c - 'a' + 10;
-    if ((c >= 'A') && (c <= 'F'))
-        return c - 'A' + 10;
-    return 0;
+/**
+ * 将字符转换为16进制
+*/
+static char ch2hex (char ch) {
+    if (ch >= '0' && ch <= '9') {
+        return ch - '0';
+    } else if (ch >= 'a' && ch <= 'f') {
+        return ch - 'a' + 10;
+    } else if (ch >= 'A' && ch <= 'F') {
+        return ch - 'A' + 10;
+    } else {
+        return 0;
+    }
 }
 
-static uint8_t _str_to_hex(const char* input) {
-    uint8_t num = 0;
+static int buf2num (const char * buf) {
+    int num = 0;
 
     char c;
-    while ((c = *input++) != '\0') {
-        num = (num << 4) | _char_to_hex(c); 
+    while ((c = *buf++) != '\0') {
+        num = num << 4 | ch2hex(c);
     }
-
     return num;
 }
 
-// 把寄存器中的内容写到特定位置的内存中
-static char* write_mem_from_reg(char* target_mem, riscv_word_t source_reg, int size) {
-    // 根据 size 的大小 每个字节每个字节的去写入
-    for (int i = 0; i < size ; i ++) {
-        // 以小端的方式发送     0x12345678 => 78 56 34 12
+/**
+ * 创建一个GDB服务器，用于远程调试RISC-V处理器。
+ */
+gdb_server_t * gdb_server_create(riscv_t * riscv, int port, int debug) {
+    gdb_server_t *server = (gdb_server_t *) calloc(1, sizeof(gdb_server_t));
+    RETURN_IF_MSG(server == NULL, err, "malloc failed");
 
-        // 取出字节中的倒数第二位
-        char c = (source_reg & 0xF0) >> 4;
-        *target_mem++ = (c < 10) ? ('0' + c) : (c - 'a' + 10);
+    // create socket
+    socket_t sock_fd = socket(AF_INET, SOCK_STREAM, 0);
+    RETURN_IF_MSG(sock_fd == -1, err, strerror(errno));
 
-        // 取出字节中的最后一位
-        c = (source_reg & 0xF);
-        *target_mem++ = (c < 10) ? ('0' + c) : (c - 'a' + 10);
+    // 允许在同一端口上立即重新使用
+    int reuse = 1;
+    int rc = setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, (void *)&reuse, sizeof(reuse));
+    RETURN_IF_MSG(rc < 0, err, strerror(errno));
 
-        // 更新寄存器内容
-        source_reg = (source_reg >> 8);
-    }
+    struct sockaddr_in sockaddr;
+    sockaddr.sin_family = AF_INET;
+    sockaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+    sockaddr.sin_port = htons(port);
+    rc = bind(sock_fd, (struct sockaddr *) &sockaddr, sizeof(sockaddr));
+    RETURN_IF_MSG(rc < 0, err, strerror(errno));
 
-    return target_mem;
+    rc = listen(sock_fd, 1);
+    RETURN_IF_MSG(rc < 0, err, strerror(errno));
+
+    server->riscv = riscv;
+    server->sock = sock_fd;
+    server->debug = debug;
+    return server;
+err:
+    exit(-1);
+    return NULL;
 }
 
-/* 对通信数据包进行日志记录 */
+/**
+ * 等待客户端的连接。
+*/
+static int gdb_wait_client (gdb_server_t * server) {
+    // 等待客户端连接
+    struct sockaddr_in sockaddr;
+    int socklen = sizeof(sockaddr);
+    socket_t client = accept(server->sock, (struct sockaddr *) &sockaddr, &socklen);
+    RETURN_IF_MSG(client == INVALID_SOCKET, err, strerror(errno));
 
-static void print_packet_log(gdb_server_t* gdb_server, int received, char* msg) {
-    if (gdb_server->debug_info) {
-        char time_buffer[80];
-        time_t raw_time;
-        time(&raw_time);
-        struct tm* time_info = localtime(&raw_time);
-        strftime(time_buffer, sizeof(time_buffer), "%Y-%m-%d %H:%M:%S", time_info);
-        
-        if (received) {
-            // 对接收的数据包输出
-            printf("%s-<$: %s\n", time_buffer, debug_info_buffer);
-        }
-        else {
-            // 对发送的数据包输出
-            printf("%s->$: %s\n", time_buffer, msg);
-        }
-    }
+    // 记录读取信息，转换成文件描述符方便进行处理
+    server->client = client;
+    return 0;
+err:
+    exit(-1);
+    return -1;
 }
 
-/* 解析 client 发送的数据包 */
-
-static char _read_starter_char(gdb_server_t* gdb_server, char curr) {
-    // flags: 以默认方式接收不进行任何特殊处理
-    recv(gdb_server->gdb_client, &curr, 1, 0);
-    if (curr == EOF) {
-        // 没有读到任何数据
-        fprintf(stderr, "connection closed by client\n");
-        goto close;
-    }
-
-    if (curr == '+') {
-        // 成功收到数据
-        fprintf(stdout, "successfully received data from client!\n");
-        curr = EOF;
-        return _read_starter_char(gdb_server, curr);
-    }
-
-    if (curr == '$') {
-        // 成功找到 start_label 返回
-        return curr;
-    }
-
-close:
-    return EOF;
+/**
+ * 关闭GDB连接
+ */
+static void gdb_close_connection (gdb_server_t * server) {
+#ifdef _WIN32
+    closesocket(server->client);
+#else
+    close(server->client);
+#endif
 }
 
-static uint8_t _read_command_char(gdb_server_t* gdb_server, uint8_t checksum) {
-    int curr_index = 0;
-    char curr = EOF;
-    while(1) {
-        if (curr_index > DEBUG_INFO_BUFFER_SIZE) {
-            fprintf(stderr, "data oversize\n");
-            goto close;
+/**
+ * 读取GDB数据包:$packet-data#checksum
+ */
+static char * gdb_read_packet (gdb_server_t * server) {
+
+    while (1) {
+         // 找到第数据包开始$
+        char ch = EOF;
+        recv(server->client, &ch, 1, 0);
+        if (ch == EOF) {
+            fprintf(stderr, "connection closed by remote.\n");
+            goto err;
+        } else if (ch != '$') {
+            fprintf(stderr, "skip: %c\n", ch);
+            continue;
         }
 
-        curr = EOF;
-        recv(gdb_server->gdb_client, &curr, 1, 0);
-
-        if (curr == EOF) {
-            fprintf(stderr, "connection closed by client\n");
-            goto close;
-        }
-
-        if (curr == '#') {
-            // 判断是否读取到 checksum 段
-            break;
-        }
-
-        // 根据 command 更新 checksum   (注意在转义之前计算)
-        checksum += curr;
-
-        if (curr == GDB_ESCAPE) {
-            // 对转义字符的处理     '}#^0x20'
-            recv(gdb_server->gdb_client, &curr, 1, 0);  // 读入下一个字符
-            curr = curr ^ 0x20;
-            checksum += curr;
-        }
-        
-        // 读取 command 有效数据
-        debug_info_buffer[curr_index++] = curr;
-    }
-
-    // 读取到 checksum 标记结束循环
-    debug_info_buffer[curr_index] = '\0';       // 定义为一个完整字符串
-    return checksum;
-
-close:
-    return EOF;
-}
-
-static char _read_checksum_char(gdb_server_t* gdb_server, uint8_t checksum) {
-    // 类似于 "#ca" 这样 两位 16 进制字符
-    
-    // 接收读取的 checksum
-    char read_checksum_str[3] = {0};
-    uint8_t read_checksum_num = 0;
-
-    char curr = EOF;
-
-    // 以字符的方式读取两位
-    for (int i = 0; i < 2; i++) {
-        curr = EOF;
-        recv(gdb_server->gdb_client, &curr, 1, 0);
-
-        if (curr == EOF) {
-            fprintf(stderr, "connection closed by client\n");
-            goto close;
-        }
-
-        read_checksum_str[i] = curr;
-    }
-
-    // 将字符结果转换为数字
-    read_checksum_num = _str_to_hex(read_checksum_str);
-
-    // 判断 checksum 的合法性
-    if (read_checksum_num != checksum) {
-        if (gdb_server->debug_info) {
-            printf("-> %s\n", debug_info_buffer);
-        }
-
-        fprintf(stderr, "checksum failed\n");
-
-        // 通知客户端请求重新发送
-        send(gdb_server->gdb_client, "-", 1, 0);
-    }
-    else {
-        // 通知客户端接收成功
-        send(gdb_server->gdb_client, "+", 1, 0);
-        curr = '0';
-    }
-    return curr;
-
-close:
-    return EOF;
-}
-
-// 解析 client-socket 发来的数据包内容
-static char* gdb_read_packet(gdb_server_t* gdb_server) {
-    // 从结构上可以视为三个部分: start_label(+$) + command + '#' + checksum
-    // Tip: command 区域包含对 '#' 的转义处理   '}#^0x20'   通过 EOF 判断结束
-    
-    
-    // 因为数据是以字符串的方式传入的 所以定义一个单字符来判断当下读取的字符
-    char debug_info_current = EOF;
-    
-
-    while(1) {
-        // 初始化每条通讯的 checksum
+        // 读取数据部分
+        int count = 0;
         uint8_t checksum = 0;
+        while (1) {
+            if (count >= GDB_PACKET_SIZE) {
+                fprintf(stderr, "packet size too large.\n");
+                goto err;
+            }
 
-        // 对 start_label 的处理
-        debug_info_current = _read_starter_char(gdb_server, debug_info_current);
+            ch = EOF;
+            recv(server->client, &ch, 1, 0);
+            RETURN_IF_MSG(ch == EOF, err, "connection closed by remote.\n");
+            if (ch == '#') {
+                break;
+            }
+            checksum += ch;
 
-        // 对 command 的处理
-        if (debug_info_current != EOF) {
-            checksum = _read_command_char(gdb_server, checksum);
+            // 如果是转义字符，跳过去取后面的字符
+            if (ch == GDB_ESCAPE) {
+                ch = EOF;
+                recv(server->client, &ch, 1, 0);
+                RETURN_IF_MSG(ch == EOF, err, "connection closed by remote.\n");
+                checksum += ch;
+                ch ^= 0x20;
+           }
+            request[count++] = ch;
         }
+        request[count] = '\0';
 
-        // 对 checksum 的处理
-        debug_info_current = _read_checksum_char(gdb_server, checksum);
-        if (debug_info_current == '0') {
-            break;
+        // 读取校验码
+        char temp[3] = {0};
+        uint8_t read_checksum = 0;
+        for (int i = 0; i < 2; i++) {
+            ch = EOF;
+            recv(server->client, &ch, 1, 0);
+            RETURN_IF_MSG(ch == EOF, err, "connection closed by remote.\n");
+            temp[i] = ch;
         }
-        
+        read_checksum = buf2num(temp);
+
+        // 检查校验码
+        if (read_checksum != checksum) {
+            if (server->debug) {
+                printf("-> %s\n", request);
+            }
+            fprintf(stderr, "checksum error: recv(0x%02x) != cal(0x%02x)\n", read_checksum, checksum);
+            send(server->client, "-", 1, 0);
+            goto err;
+        } else {
+            // 通知成功接收
+            send(server->client, "+", 1, 0);
+        }
+        break;
     }
 
-    // 日志打印
-    print_packet_log(gdb_server, 1, "");
-
-    // 已经读取一个完整数据包   返回解析字符串
-    return debug_info_buffer;
+    // 通信日志输出
+    if (server->debug) {
+        char buffer[80];
+        time_t rawtime;
+        time(&rawtime);
+        struct tm * info = localtime(&rawtime);
+        strftime(buffer, 80, "%Y-%m-%d %H:%M:%S", info);
+        printf("%s ->$%s\n", buffer, request);
+    }
+    return request;
+err:
+    return NULL;
 }
 
+/**
+ * 发送数据包: $packet-data#checksum
+ */
+static int gdb_write_packet(gdb_server_t * server, char *data) {
+    char tx_buf[1024];
+    int idx = 0;
 
-/* 生成 server 发送的数据包 */
+    // 数据起始
+    tx_buf[idx++] = '$';
 
-
-// 根据数据包格式打包
-static int gdb_write_packet(gdb_server_t* gdb_server, char* msg) {
-    char reply_buffer[DEBUG_INFO_BUFFER_SIZE];
-    int reply_buffer_index = 0;
-    char checksum_hex[4] = {0};     // 字符类型的校验和
-    uint8_t write_checksum = 0;
-
-    // 定义起始符号
-    reply_buffer[reply_buffer_index++] = '$';
-    for(char* ptr = msg; *ptr; ptr++) {
+    uint8_t checksum = 0;
+    for (char * ptr = data; *ptr != 0; ptr++) {
         char c = *ptr;
 
-        // 对转义字符进行一个额外的处理
-        if (c == '#' || c == '$' || c == '*' || c == '}') {
-            reply_buffer[reply_buffer_index++] = GDB_ESCAPE;
-            *ptr ^= 0x20;
-            write_checksum += GDB_ESCAPE;
+        if (c == EOF) {
+            break;
+
         }
-        reply_buffer[reply_buffer_index++] = c;
-        write_checksum += *ptr;
+
+        // 字符转义
+        if ((c == '$') || (c == '#') || (c == GDB_ESCAPE) || (c == '*')) {
+            char esc = GDB_ESCAPE;
+            tx_buf[idx++] = esc;
+
+            checksum += esc;
+            *ptr ^= 0x20;
+        }
+
+        tx_buf[idx++] = c;
+        checksum += *ptr;
     }
 
-    // 写入字符形式的校验和
-    // char *const _Buffer: 目标缓冲区
-    // size_t size: 表示缓冲区大小  包括终止符 '\0'
-    // format: (#) 使用替代形式 针对 '%x' / '%X' 的添加 0x / 0X   (%) 每个格式说明符都以 '%' 开始    (0) 零填充   (2) 指定宽度   (x) 十六进制输出整数
-    // 格式化字符串并将其写入到一个缓冲区中
-    snprintf(reply_buffer + reply_buffer_index, sizeof(checksum_hex), "#%02x", write_checksum);
-
-    // 发送数据包
-    send(gdb_server->gdb_client, reply_buffer, (int) strlen(reply_buffer), 0);
+    // 写校验和部分
+    char hex[4] = {0};
+    snprintf(tx_buf + idx, sizeof(hex), "#%02x", checksum);
+    send(server->client, tx_buf, (int)strlen(tx_buf), 0);
 
     // 日志打印
-    print_packet_log(gdb_server, 0, msg);
-
-    // 检查对方是否正确接收 (会返回一个 '+')
-    char curr = EOF;
-    // curr = _read_starter_char(gdb_server->gdb_client, curr);
-    // 因为 curr 会在 _read_starter_char 初始化 所以这里没办法用 _read_starter_char() 处理
-
-    recv(gdb_server->gdb_client, &curr, 1, 0);  // Q: 卡死
-    RETURN_IF_MSG(curr == EOF, err, "client failed to receive your msg\n");
-    
-    // 没有正确接收重新发送
-    if (curr != '+') {
-        RETURN_IF_MSG(curr == EOF, err, "client failed to receive your msg correctly, now retry..\n");
-        // 实际上因为项目在本机上而且是 TCP 连接不太可能发生丢包错误
-        // 如果是校验码的错误也不会因为重新发包而解决
-        // 所以这里只写了框架没有进一步的处理
-        goto err;
+    if (server->debug) {
+        char buffer[80];
+        time_t rawtime;
+        time(&rawtime);
+        struct tm * info = localtime(&rawtime);
+        strftime(buffer, 80, "%Y-%m-%d %H:%M:%S", info);
+        printf("%s <-$%s\n", buffer, data);
     }
 
-    if (curr == '+') {
-        return 0;
+    // 读取响应
+    char ch = EOF;
+    recv(server->client, &ch, 1, 0);
+    RETURN_IF_MSG(ch == EOF, err, "connection closed by remote.");
+    if (ch != '+') {
+        fprintf(stderr, "not +\n");
     }
+
+    return 0;
 err:
     return -1;
 }
 
-// 发送一个声明错误的数据包
-static int gdb_write_err_packet(gdb_server_t* gdb_server, int code) {
-    sprintf(gdb_server->gdb_send_buffer, "E%02x", code);
-    return gdb_write_packet(gdb_server, gdb_server->gdb_send_buffer);
+/**
+ * 发送不支持的命令: $#00
+*/
+static int gdb_write_unsupport (gdb_server_t * server) {
+    return gdb_write_packet(server, "");
 }
 
-static int gdb_write_unsupport(gdb_server_t* gdb_server) {
-    // 不支持命令回复       直接返回空字符串
-    return gdb_write_packet(gdb_server, "");
+/**
+ * 发送停止数据包
+*/
+static int gdb_write_stop (gdb_server_t * server) {
+    snprintf(server->tx_buf, sizeof(server->tx_buf), "S%02x", GDB_SIGTRAP);
+    return gdb_write_packet(server, server->tx_buf);
 }
 
-/* 根据 gdb_command 对模拟器的调试操作 */
+/**
+ * 发送错误码：E NN
+*/
+static int gdb_write_error (gdb_server_t * server, int code) {
+    sprintf(server->tx_buf, "E%02x", code);
+    return gdb_write_packet(server, server->tx_buf);
+}
 
-static int gdb_read_regs(gdb_server_t* gdb_server) {
-    // 32 个寄存器的内容按顺序拼接在一起    以 16 进制的方式发送
+/**
+ * 查询状态
+*/
+static int gdb_handle_query (gdb_server_t * server, char * packet) {
+    if (strncmp(packet, "Supported", 9) == 0) {
+        snprintf(server->tx_buf, sizeof(server->tx_buf), "PacketSize=%x;vContSupported+", GDB_PACKET_SIZE);
+        return gdb_write_packet(server, server->tx_buf);
+    } else if (strncmp(packet, "Attached", 9) == 0) {
+        // 检查是否已经连接到了被调试对像
+        snprintf(server->tx_buf, sizeof(server->tx_buf), "1");
+        return gdb_write_packet(server, server->tx_buf);
+    } else if (strcmp(packet, "Rcmd,726567") == 0) {
+        // 复位RISC-V内核
+        riscv_reset(server->riscv);
 
-    char* reg_buffer = gdb_server->gdb_send_buffer;
-    for (int i = 0; i < RISCV_REG_NUM; i ++) {
-        // 按顺序读取寄存器的值并且每次写入 4B
-        reg_buffer = write_mem_from_reg(reg_buffer, riscv_read_reg(gdb_server->riscv, i), 4);
-        // 更新目前记录数据的指针指向
+        snprintf(server->tx_buf, sizeof(server->tx_buf), "OK");
+        return gdb_write_packet(server, server->tx_buf);
+    } else if (strncmp(packet, "Rcmd", 4) == 0) {
+        snprintf(server->tx_buf, sizeof(server->tx_buf), "OK");
+        return gdb_write_packet(server, server->tx_buf);
     }
 
-    // 把读取到的完整消息设置为一个字符串
-    *reg_buffer = '\0';
+    return gdb_write_unsupport(server);
+}
+
+/**
+ * 在第一次建立GDB连接时，查询目标是什么原因停下的
+*/
+static int gdb_handle_query_stop (gdb_server_t * server, char * packet) {
+    return gdb_write_stop(server);
+}
+
+static char * write_mem_hex (char * buf, riscv_word_t data, int size) {
+    for (int i = 0; i < size; i++) {
+        char c = (data & 0xF0) >> 4;
+        *buf++ = c < 10 ? ('0' + c) : ('a' + c - 10);
+        c = data & 0xF;
+        *buf++ = c < 10 ? ('0' + c) : ('a' + c - 10);
+        data >>= 8;
+    }
+    return buf;
+}
+
+/**
+ * 批量读取通用寄存器命令处理:g
+ * 注意，这里使用GDB内部的默认寄存器布局
+ */
+static int gdb_handle_read_regs (gdb_server_t * server, char * packet) {
+    char * tx_buf = server->tx_buf;
+    for (int i = 0; i < RISCV_REGS_SIZE; i++) {
+        tx_buf = write_mem_hex(tx_buf, riscv_read_reg(server->riscv, i), 4);
+    }
+
+    *tx_buf = '\0';
+    return gdb_write_packet(server, server->tx_buf);
+}
+
+/**
+ * 读取指定的寄存器: p n
+*/
+static int gdb_handle_read_reg (gdb_server_t * server, char * packet) {
+    // 寄存器序号
+    char * token = strtok(packet, "=");
+    RETURN_IF_MSG(token == NULL, err, "packet error");
+    int reg = strtoul(packet, NULL, 16);
+    if (reg > RISCV_REGS_SIZE) {
+        return gdb_write_error(server, 1);
+    }
     
-    // 发送数据包
-    return gdb_write_packet(gdb_server, gdb_server->gdb_send_buffer);
-}
-
-static int gdb_read_specified_reg(riscv_t* riscv, int reg_num) {
-    return riscv_read_reg(riscv, reg_num);
-}
-
-/* 根据 gdb 协议生成控制命令 */
-
-static int gdb_singal_stop(gdb_server_t* gdb_server) {
-    // S05: 表示目标由于一个 trap 指令停止
-    snprintf(gdb_server->gdb_send_buffer, DEBUG_INFO_BUFFER_SIZE, "PacketSize=%x;vContSupported+", DEBUG_INFO_BUFFER_SIZE);
-    return gdb_write_packet(gdb_server, gdb_server->gdb_send_buffer);
-}
-
-static int gdb_handle_command_q(gdb_server_t* gdb_server, char* packet_data) {
-    if (strncmp(packet_data, "Supported", 9) == 0) {
-        // GDB-client 查询目标所支持的功能      目前响应定义为支持 vContSupported 功能
-        snprintf(gdb_server->gdb_send_buffer, DEBUG_INFO_BUFFER_SIZE, "PacketSize=%x;vContSupported+", DEBUG_INFO_BUFFER_SIZE);
-        return gdb_write_packet(gdb_server, gdb_server->gdb_send_buffer);
+    riscv_word_t data;
+    if (reg < RISCV_REGS_SIZE) {
+        data = riscv_read_reg(server->riscv, reg);
+    } else if (reg == RISCV_REGS_SIZE) {
+        data = server->riscv->pc;
     }
-
-    if (strncmp(packet_data, "?", 1) == 0) {
-        // 查询目标为何停止     1/断点  2/信号  3/异常 ...
-        return gdb_singal_stop(gdb_server);
-    }
-
-    if (strncmp(packet_data, "Attached", 8) == 0) {
-        // 查询 gdb 是否是以附加的方式连接到目标
-        // 附加方式: 程序并非由 gdb 启动    通过 pid 执行
-        // 启动方式: 由 gdb 启动该程序
-        // 模拟器是单独的程序 通过通信的方式调试 所以是附加方式
-        snprintf(gdb_server->gdb_send_buffer, DEBUG_INFO_BUFFER_SIZE, "1");
-        return gdb_write_packet(gdb_server, gdb_server->gdb_send_buffer);
-    }
-
-    /* 下面是不支持的命令 其实可以用统一的用 unsupport 表示 但是写出来更清晰一些 */
-
-    if(strncmp(packet_data, "TStatus", 7) == 0) {
-        // 查询目标的追踪状态   通常在追踪点功能时使用  和 collect 配合使用 捕获特定点的信息而不暂停执行
-        return gdb_write_unsupport(gdb_server);
-    }
-
-    if(strncmp(packet_data, "fThreadInfo", 11) == 0) {
-        // 请求第一批线程的信息
-        return gdb_write_unsupport(gdb_server);
-    }
-
-    if(strncmp(packet_data, "C", 1) == 0) {
-        // 请求当前线程的 ID
-        return gdb_write_unsupport(gdb_server);
-    }
-    return gdb_write_unsupport(gdb_server);
-}
-
-static int gdb_handle_command_p(gdb_server_t* gdb_server, char* packet_data) {
-    // 获取指定的寄存器编号
-    int reg_num = strtoul(packet_data, &packet_data, 16);
-
-    // 判断编号是否合法
-    if (reg_num > RISCV_REG_NUM) {
-        // 发送命令错误数据包
-        return gdb_write_err_packet(gdb_server, 1);
-    }
-    
-    // 得到指定寄存器内容   x0 - x31 | pc
-    riscv_word_t reg_data;
-    if (reg_num < RISCV_REG_NUM) {
-        // 普通寄存器读取
-        reg_data = gdb_read_specified_reg(gdb_server->riscv, reg_num);
-    }
-
-    if (reg_num == RISCV_REG_NUM) {
-        // pc 读取
-        reg_data = gdb_server->riscv->pc;
-    }
-
-    // 写入指定内存地址
-    char* mem_buffer = write_mem_from_reg(gdb_server->gdb_send_buffer, reg_data, 4);
-    *mem_buffer++ = '\0';
-
-    // 发送数据包
-    return gdb_write_packet(gdb_server, gdb_server->gdb_send_buffer);
-}
-
-static int gdb_handle_command_g(gdb_server_t* gdb_server, char* packet_data) {
-    // 请求所有寄存器的值   全0: 寄存器清空或者未运行任何代码
-    // 在模拟器返回的时候 32 * 32 bit
-    return gdb_read_regs(gdb_server);
-}
-
-static int gdb_handle_command_v(gdb_server_t* gdb_server, char* packet_data) {
-    // 测试命令 确认目标可以正确响应即使没有有效数据的命令      响应定义为空
-    if (strncmp(packet_data, "MustReplyEmpty", 14) == 0) {
-        return gdb_write_unsupport(gdb_server);
-    }
-    return gdb_write_err_packet(gdb_server, 2);
-}
-
-static int gdb_handle_command_h(gdb_server_t* gdb_server, char* packet_data) {
-    // 线程相关的命令   不过当下的环境用不到 所以直接返回空
-    // Hg0: 选择哪些线程是活动的线程     Hg-1: 在所有线程上执行调试命令
-    // Hc-1: 所有线程都被设置为被调试的 => 暂停所有线程
-    return gdb_write_unsupport(gdb_server);
-}
-
-
-// 定义服务器的监听端口
-gdb_server_t* gdb_server_create(struct _riscv_t* riscv, int gdb_port, int debug_info) {
-    gdb_server_t* gdb_server = (gdb_server_t*) calloc(1, sizeof(gdb_server_t));
-    RETURN_IF_MSG(gdb_server == NULL, err, "gdb_server create failed");
-    
-    // 1. 创建套接字
-    // AF_INET: 声明使用 IpV4 的地址格式
-    // SOCK_STREAM: 默认使用流式传输
-    // protocol: 0 让系统选择合适的协议(在选择了 AF_INET 和 SOCK_STREAM 的情况下默认是 IPPROTO_TCP )
-    socket_t gdb_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    RETURN_IF_MSG(gdb_socket == -1, err, strerror(errno))
-
-    // 在多次连续启动时 声明复用上一次的端口
-    int reuse = 1;
-    int rc = setsockopt(gdb_socket, SOL_SOCKET, SO_REUSEADDR, (void*) &reuse, sizeof(reuse));
-    RETURN_IF_MSG(rc < 0, err, strerror(errno))
-
-    // 2. 绑定套接字
-    struct sockaddr_in sockaddr;            // socketaddr_in 为 IpV4 设计的 socket 地址结构
-    sockaddr.sin_family = AF_INET;
-    // 利用常数 INADDR_ANY 分配服务器端的IP地址 可自动获取运行服务器的计算机 IP 地址
-    // 在这个项目里直接写 127.0.0.1 也 ok
-    // Tip: 由于转换大小端口过程中的补 0 问题   这两个函数不能混用
-    sockaddr.sin_addr.s_addr = htonl(INADDR_ANY);       // htonl(): host to net long        处理 IpV4 地址
-    sockaddr.sin_port = htons(gdb_port);                // htons(): host to net short       处理 port
-    
-    // 3. 开始监听
-    // 对 sockaddr_in 强制类型转换为 sockaddr
-    rc = bind(gdb_socket, (struct sockaddr*) &sockaddr, sizeof(sockaddr));
-    RETURN_IF_MSG(rc < 0, err, strerror(errno))
-    
-    // 4. 进入监听状态
-    // backlog: 指定监听套接字的等待队列的最大长度  | 有多少个请求可以被系统排队接受而不是立刻拒绝
-    rc = listen(gdb_socket, 1);
-    RETURN_IF_MSG(rc < 0, err, strerror(errno))
-
-    gdb_server->riscv = riscv;
-    gdb_server->debug_info = debug_info;
-    gdb_server->gdb_socket = gdb_socket;
-
-    return gdb_server;
-
+    char * tx_buf = write_mem_hex(server->tx_buf, data, sizeof(riscv_word_t));
+    *tx_buf = '\0';
+    return gdb_write_packet(server, server->tx_buf);
 err:
-    exit(-1);
+    return gdb_write_error(server, -1);
 }
 
-// 等待前端的连接请求并建议连接
-static void gdb_client_wait(gdb_server_t* gdb_server) {
-    struct sockaddr_in client_addr;
-    int clinet_addr_size = sizeof(client_addr);
+/**
+ * 读取内存命令处理: m addr,length
+ */
+static int gdb_handle_read_mem(gdb_server_t * server, char * packet) {
+    // 解析地址和长度
+    char * token = strtok(packet, ",");
+    RETURN_IF_MSG(token == NULL, err, "packet error");
+    int addr = buf2num(token);
 
-    // 得到与 client 的通信端口
-    socket_t client_socket = accept(gdb_server->gdb_socket, (struct sockaddr*) &client_addr, &clinet_addr_size);
-    // 同时监听端口不会被占用   可能有其他 client 发来连接请求  防止冲突
+    token = strtok(NULL, ",");
+    RETURN_IF_MSG(token == NULL, err, "packet error");
+    int length = buf2num(token);
 
-    RETURN_IF_MSG(client_socket == INVALID_SOCKET, err, strerror(errno))
+    char * read_buf = (char *)calloc(1, length);
+    riscv_mem_read(server->riscv, addr, (uint8_t *)read_buf, length);
 
-    gdb_server->gdb_client = client_socket;     // 后续对 image.bin 文件的操作都通过 client_socket 进行
+    char * tx_buf = server->tx_buf;
+    for (int i = 0; i < length; i++) {
+        tx_buf = write_mem_hex(tx_buf, read_buf[i], 1);
+    }
+    free(read_buf);
 
-    return;
+    *tx_buf = '\0';
+    gdb_write_packet(server, server->tx_buf);
+    return 0;
 err:
-    exit(-1);
+    gdb_write_error(server, 01);
+    return -1;
 }
 
-// 通过 gdb 实现 run by step
-static void handle_connection(gdb_server_t* gdb_server) {
-    char* packet_data;
+/**
+ * 写内存命令处理: m addr,length:xx...
+ */
+static int gdb_handle_write_mem(gdb_server_t * server, char * packet) {
+    // 解析地址和长度
+    char * token = strtok(packet, ",");
+    RETURN_IF_MSG(token == NULL, err, "packet error");
+    int addr = buf2num(token);
 
-    // 读取 client 发来的数据包     根据 Remote Serial Protocol 的格式进行解析 (就是词法分析确信)
-    while ((packet_data = gdb_read_packet(gdb_server)) != NULL) {
-        // 根据 packet_data 的读取结果进行一些反应
+    token = strtok(NULL, ":");
+    RETURN_IF_MSG(token == NULL, err, "packet error");
+    int length = buf2num(token);
 
-        // 建立调试状态     根据 gdb_P793 的回复格式定义
-        char curr = *packet_data++;
-        switch (curr) {
+    // 取数据并写入
+    token = strtok(NULL, ":");
+    char * tx_buf = server->tx_buf;
+    for (int i = 0; (i < length) && *token; i++) {
+        char data = ch2hex(*token++) << 4;
+        if (*token == '\0') {
+            break;
+        }
+        data |= ch2hex(*token++);
+        riscv_mem_write(server->riscv, addr + i, &data, 1);
+    }
+
+    gdb_write_packet(server, "OK");
+    return 0;
+err:
+    gdb_write_error(server, 01);
+    return -1;
+}
+
+/**
+ * 单步执行命令: s [addr]
+*/
+static int gdb_handle_step (gdb_server_t * server, char * packet) {
+    riscv_continue(server->riscv, 0);
+    return gdb_write_stop(server);
+}
+
+/**
+ * continue全速运行: c [addr]
+ */
+static int gdb_handle_continue(gdb_server_t * server, char * packet) {
+    // 带地址的不支持
+    if (packet[0] !='\0') {
+        return gdb_write_unsupport(server);
+    }
+
+    unsigned long ul=1;
+    int ret = ioctlsocket(server->client, FIONBIO,(unsigned long *)&ul);
+    if(ret==SOCKET_ERROR) {
+        printf("error");
+    }
+    riscv_continue(server->riscv, 1);
+
+    ul = 0;
+    ioctlsocket(server->client, FIONBIO,(unsigned long *)&ul);
+
+    return gdb_write_stop(server);
+}
+
+/**
+ * 取消断点：z type,addr,kind
+*/
+static int gdb_handl_remove_breakpoint(gdb_server_t * server, char * packet) {
+    // 类型
+    char * token = strtok(packet, ",");
+    RETURN_IF_MSG(token == NULL, err, "packet error");
+    int type = buf2num(token);
+
+    // 只支持硬件断点
+   if ((type == 1) || (type == 0)) {
+        // 地址
+        token = strtok(NULL, ",");
+        RETURN_IF_MSG(token == NULL, err, "packet error");
+        uint32_t addr = buf2num(token);
+
+        // 忽略kind
+        riscv_remove_breakpoint(server->riscv, addr);
+        return gdb_write_packet(server, "OK");
+    } else {
+        return gdb_write_unsupport(server);
+    }
+err:
+    return gdb_write_error(server, 01);
+}
+
+/**
+ * 设置断点：Z type,addr,kind
+*/
+static int gdb_handle_set_breakpoint (gdb_server_t * server, char * packet) {
+    // 类型
+    char * token = strtok(packet, ",");
+    RETURN_IF_MSG(token == NULL, err, "packet error");
+    int type = buf2num(token);
+
+    // 只支持硬件断点
+   if ((type == 1) || (type == 0)) {
+        // 地址
+        token = strtok(NULL, ",");
+        RETURN_IF_MSG(token == NULL, err, "packet error");
+        uint32_t addr = buf2num(token);
+
+        // 忽略kind
+        riscv_add_breakpoint(server->riscv, addr);
+        return gdb_write_packet(server, "OK");
+    } else {
+        return gdb_write_unsupport(server);
+    }
+err:
+    return gdb_write_error(server, 01);
+}
+
+/**
+ * 处理GDB连接请求
+ */
+static void handle_connection (gdb_server_t * server) {
+    riscv_reset(server->riscv);
+
+    char * packet;
+    while ((packet = gdb_read_packet(server)) != NULL) {
+        char ch = *packet++;
+        switch (ch) {
             case 'q':
-                gdb_handle_command_q(gdb_server, packet_data);
+                gdb_handle_query(server, packet);
                 break;
-            
-            case 'v':
-                gdb_handle_command_v(gdb_server, packet_data);
+            case 's':
+                gdb_handle_step(server, packet);
                 break;
-
-            case 'H':
-                gdb_handle_command_h(gdb_server, packet_data);
+            case 'c':
+                gdb_handle_continue(server, packet);
                 break;
-
-            case '?':
-                gdb_handle_command_q(gdb_server, packet_data);
-                break;
-
             case 'g':
-                gdb_handle_command_g(gdb_server, packet_data);
+                gdb_handle_read_regs(server, packet);
                 break;
-
+            case 'm':
+                gdb_handle_read_mem(server, packet);
+                break;
+            case 'M':
+                gdb_handle_write_mem(server, packet);
+                break;
             case 'p':
-                gdb_handle_command_p(gdb_server, packet_data);
+                gdb_handle_read_reg(server, packet);
                 break;
-
+            case 'z':
+                gdb_handl_remove_breakpoint(server, packet);
+                break;
+            case 'Z':
+                gdb_handle_set_breakpoint(server, packet);
+                break;
+            case '?':
+                gdb_handle_query_stop(server, packet);
+                break;
+                break;
+            case 'k':
+                return;
+            case 'D':
+                // GDB断开连接了
+                return;
             default:
-                gdb_write_unsupport(gdb_server);
+                gdb_write_unsupport(server);
                 break;
         }
     }
-
 }
 
-// 断开连接
-static void gdb_client_close(gdb_server_t* gbd_server) {
-
-}
-
-void gdb_server_run(gdb_server_t* gbd_server) {
-    // 类似于服务器后端工作
-    while(1) {
-        // 等待前端 gdb_client 的连接请求
-        gdb_client_wait(gbd_server);
-        handle_connection(gbd_server);
-        gdb_client_close(gbd_server);
+/**
+ * GDB服务运行
+*/
+void gdb_server_run(gdb_server_t *server) {
+    while (1) {
+        gdb_wait_client(server);
+        handle_connection(server);
+        gdb_close_connection(server);
     }
 }

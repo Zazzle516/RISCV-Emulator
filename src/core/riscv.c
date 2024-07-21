@@ -1,498 +1,664 @@
-#include "instr_implements.h"
-#include<stdlib.h>
-#include<assert.h>
-#include<stdio.h>
-#include<string.h>
+﻿#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "plat/plat.h"
+#include "instr.h"
+#include "riscv.h"
+#include "device/mem.h"
 
-// CSR 寄存器相关
-void riscv_csr_init(riscv_t* riscv) {
 
-}
-
-// CSR 寄存器读写
-riscv_word_t riscv_read_csr(riscv_t* riscv, riscv_word_t addr) {
-    return riscv->riscv_csr_regs.mscratch;
-}
-
-void riscv_write_csr(riscv_t* riscv, riscv_word_t addr, riscv_word_t val) {
-    riscv->riscv_csr_regs.mscratch = val;
-}
-
-// RISCV 相关
+/**
+ * 创建一个RISCV内核对像
+*/
 riscv_t* riscv_create(void) {
-    riscv_t* riscv = (riscv_t*)calloc(1, sizeof(riscv_t));    // 因为要求返回指针 所以分配一个空间就可以    32 + 32 + 32*32 / 144
-    assert(riscv != NULL);  // 判断为 True 继续运行
+    // 创建RISC-V对像
+    riscv_t* riscv = (riscv_t*)calloc(1, sizeof(riscv_t));
+    assert(riscv != NULL);
     return riscv;
-}
+} 
 
-// 挂载 flash 结构体
-void riscv_flash_set(riscv_t* riscv, mem_t* flash) {
-    riscv->riscv_flash = flash;
-}
-
-// 读取 image.bin 文件
-void riscv_load_bin(riscv_t* riscv, const char* file_name) {
-    // 相对路径在 launch.json 文件定义的根路径中
-    // 注意指定读取方式 以二进制 b 的形式读取
-    FILE* file = fopen(file_name, "rb");
-
-    // 判断文件是否存在
-    if (file == NULL) {
-        fprintf(stderr, "file %s doesn't exist\n", file_name);
-        exit(-1);
+/**
+ * 添加一个外部设备
+*/
+void riscv_add_device (riscv_t * riscv, device_t * dev) {
+    dev->next = riscv->dev_list;
+    riscv->dev_list = dev;
+    if (riscv->dev_read == NULL) {
+        riscv->dev_read = dev;
+    }
+    if(riscv->dev_write == NULL) {
+        riscv->dev_write = dev;
     }
 
-    // 判断文件是否为空 程序报错退出
-    if (feof(file)) {
-        fprintf(stderr, "file %s is empty\n", file_name);
-        exit(-1);
-    }
-
-    // 确认文件成功打开后写入数据(有缓冲区的方式)
-    char buffer[1024];
-    char* destination = riscv->riscv_flash->mem;    // 以写入的数据大小作为类型
-    
-    size_t size;
-
-    // 之前我这里的 size 赋值少加了括号 然后优先级判定 size = 1 出了 bug
-    while ((size = fread(buffer, 1, sizeof(buffer), file)) > 0) {
-        // 判断大于 0 只是判断仍然有内容没有写入 所以不一定每次都是 1024
-        memcpy(destination, buffer, size);
-        destination += size;
-    }
-
-    // 记得关闭
-    fclose(file);
+    dev->riscv = riscv;
 }
 
-// 重置芯片状态
-void riscv_reset(riscv_t* riscv) {
-    riscv->pc = 0;      // 因为 main.c 中定义的 RISCV_FLASH_START 是从 0 开始
-    memset(riscv->regs, 0, sizeof(riscv->regs));
-
-    // 并没有重置 Flash 和 RAM
-
-    // 添加了指令结构体之后也重置指令
-    riscv->instr.raw = 0;
-
-    // 重新读写设备缓存
-    riscv->dev_read_buffer = riscv->dev_write_buffer = riscv->device_list;
-
-    // 初始化 CSR 寄存器
-    riscv_csr_init(riscv);
+void riscv_set_flash (riscv_t * riscv, mem_t * dev) {
+    riscv->flash = dev;
 }
 
-// 添加不同外部设备
-void riscv_device_add(riscv_t* riscv, riscv_device_t* dev){
-    // 使用头插法完成设备的添加
-    dev->next = riscv->device_list;     // 首先指向头结点
-
-    riscv->device_list = dev;           // 重新链接起来
-
-    // 初始化 device_buffer
-    if (riscv->dev_read_buffer == NULL) {
-        riscv->dev_read_buffer = dev;
-    }
-    if (riscv->dev_write_buffer == NULL) {
-        riscv->dev_write_buffer = dev;
-    }
-}
-
-// 取值 -> 分析指令 -> 执行指令 流程模拟(核心)
-void riscv_continue(riscv_t* riscv, int forever) {
-    // 取指 riscv->pc; 
-
-    // 预处理: 获取指向 image.bin 空间的指针
-    // Q: 这个地方的强制类型转换是为什么    虽然它们的类型确实不一样    不能直接用 uin8_t* 接收吗
-    riscv_word_t* mem = (riscv_word_t*) riscv->riscv_flash->mem;
-    
-    // 对执行的指令进行判断
-    do
-    {
-        // 判断指令的地址合法性
-        if (riscv->pc < riscv->riscv_flash->riscv_dev.addr_start || riscv->pc > riscv->riscv_flash->riscv_dev.addr_end) {
-            fprintf(stderr, "Illegal Instruction Address\n");
-            return;
+/**
+ * 查找一个存储区
+*/
+device_t * riscv_find_device(riscv_t * riscv, riscv_word_t addr) {
+    device_t * curr = riscv->dev_list;
+    while (curr) {
+        if ((addr >= curr->base) && (addr < curr->end)) {
+            return curr;
         }
-
-        // 根据 pc 得到指令的具体内容   单个指令的单位长度为 4B    这里通过下标访问
-        riscv_word_t instruc = mem[(riscv->pc - riscv->riscv_flash->riscv_dev.addr_start) >> 2];
-        
-        // 也可以直接访问 pc
-        // riscv_word_t instruc = (riscv_word_t *) riscv->pc;   直接访问肯定不行 因为访问的是 0x0000 是本机的地址 一定会被 OS 阻止 所以一定要加上 mem 的首地址
-        // riscv_word_t instruc = (riscv_word_t *)(riscv->pc + mem);
-
-        // 把指令放到 IR 中
-        riscv->instr.raw = instruc;
-
-        switch (riscv->instr.opcode)
-        {
-        case OP_BREAK: {
-            switch (riscv->instr.i.funct3)
-            {
-            case FUNC3_EBREAK:
-                fprintf(stdout, "found ebreak!\n");
-                return;
-            case FUNC3_CSRRW:
-                handle_csrrw(riscv);
-                break;
-            case FUNC3_CSRRS:
-                handle_csrrs(riscv);
-                break;
-            case FUNC3_CSRRC:
-                handle_csrrc(riscv);
-                break;
-            case FUNC3_CSRRWI:
-                handle_csrrwi(riscv);
-                break;
-            case FUNC3_CSRRSI:
-                handle_csrrsi(riscv);
-                break;
-            case FUNC3_CSRRCI:
-                handle_csrrci(riscv);
-                break;
-            default:
-                goto cond_end;
-            }
-            break;
-        }
-
-        case OP_ADDI: {
-            switch (riscv->instr.i.funct3){
-                case FUNC3_ADDI: {
-                    handle_addi(riscv);
-                    break;
-                }
-                case FUNC3_SLTI: {
-                    handle_slti(riscv);
-                    break;
-                }
-                case FUNC3_SLTIU: {
-                    handle_sltiu(riscv);
-                    break;
-                }
-                case FUNC3_XORI: {
-                    handle_xori(riscv);
-                    break;
-                }
-                case FUNC3_ORI: {
-                    handle_ori(riscv);
-                    break;
-                }
-                case FUNC3_ANDI: {
-                    handle_andi(riscv);
-                    break;
-                }
-                case FUNC3_SLLI: {
-                    handle_slli(riscv);
-                    break;
-                }
-
-                // 注意手册上 SRLI 和 SRAI 是两个指令 但是它们的 funct3 是相同的 所以用一条指令 SR 表示
-                case FUNC3_SR: {
-                    handle_srai_srli(riscv);
-                    break;
-                }
-
-                default:
-                    goto cond_end;
-            }
-            break;
-        }
-
-        case OP_ADD: {
-            switch (riscv->instr.r.funct3)
-            {
-                case FUNC3_ADD: {
-                    switch (riscv->instr.r.funct7)
-                    {
-                    case FUNC7_ADD:
-                        handle_add(riscv);
-                        break;
-                    case FUNC7_SUB:
-                        handle_sub(riscv);
-                        break;
-                    case FUNC7_MUL:
-                        handle_mul(riscv);
-                        break;
-                    default:
-                        goto cond_end;
-                    }
-                    break;
-                }
-                
-                case FUNC3_SLL: {
-                    switch (riscv->instr.r.funct7)
-                    {
-                    case FUNC7_MUL:
-                        handle_mulh(riscv);
-                        break;
-                    case FUNC7_ADD:
-                        handle_sll(riscv);
-                        break;
-                    default:
-                        goto cond_end;
-                    }
-                    break;
-                }
-                    
-                case FUNC3_SLT: {
-                    switch (riscv->instr.r.funct7)
-                    {
-                    case FUNC7_MUL:
-                        handle_mulhsu(riscv);
-                        break;
-                    case FUNC7_ADD:
-                        handle_slt(riscv);
-                        break;
-                    default:
-                        goto cond_end;
-                    }
-                    break;
-                }
-                    
-                case FUNC3_SLTU: {
-                    switch (riscv->instr.r.funct7)
-                    {
-                    case FUNC7_ADD:
-                        handle_sltu(riscv);
-                        break;
-                    case FUNC7_MUL:
-                        handle_mulhu(riscv);
-                        break;
-                    default:
-                        goto cond_end;
-                    }
-                    break;
-                }
-                
-                case FUNC3_XOR: {
-                    switch (riscv->instr.r.funct7)
-                    {
-                    case FUNC7_DIV:
-                        handle_div(riscv);
-                        break;
-                    case FUNC7_ADD:
-                        handle_xor(riscv);
-                        break;
-                    default:
-                        goto cond_end;
-                    }
-                    break;
-                }
-
-                case FUNC3_SR: {
-                    switch (riscv->instr.r.funct7)
-                    {
-                    case FUNC7_DIV:
-                        handle_divu(riscv);
-                        break;
-                    case FUNC7_ADD:
-                        handle_srl(riscv);
-                        break;
-                    case FUNC7_SRA:
-                        handle_sra(riscv);
-                        break;
-                    default:
-                        goto cond_end;
-                    }
-                    break;
-                }
-
-                case FUNC3_OR: {
-                    switch (riscv->instr.r.funct7)
-                    {
-                    case FUNC7_ADD:
-                        handle_or(riscv);
-                        break;
-                    case FUNC7_DIV:
-                        handle_rem(riscv);
-                        break;
-                    default:
-                        goto cond_end;
-                    }
-                    break;
-                }
-
-                case FUNC3_AND: {
-                    switch (riscv->instr.r.funct7)
-                    {
-                    case FUNC7_ADD:
-                        handle_and(riscv);
-                        break;
-                    case FUNC7_DIV:
-                        handle_remu(riscv);
-                        break;
-                    default:
-                        goto cond_end;
-                    }
-                    break;
-                }
-
-                default:
-                    goto cond_end;
-                }
-            break;
-        }
-        
-        case OP_LUI: {
-            handle_lui(riscv);
-            break;
-        }
-
-        case OP_SB: {
-            switch (riscv->instr.s.funct3)
-            {
-            case FUNC3_SB:
-                handle_sb(riscv);
-                break;
-            case FUNC3_SH:
-                handle_sh(riscv);
-                break;
-            case FUNC3_SW:
-                handle_sw(riscv);
-                break;
-            default:
-                goto cond_end;
-            }
-            break;
-        }
-
-        case OP_LB: {
-            switch (riscv->instr.i.funct3)
-            {
-            case FUNC3_LB:
-                handle_lb(riscv);
-                break;
-            case FUNC3_LH:
-                handle_lh(riscv);
-                break;
-            case FUNC3_LW:
-                handle_lw(riscv);
-                break;
-            case FUNC3_LBU:
-                handle_lbu(riscv);
-                break;
-            case FUNC3_LHU:
-                handle_lhu(riscv);
-                break;
-            default:
-                goto cond_end;
-            }
-            break;
-        }
-        
-        case OP_AUIPC: {
-            handle_auipc(riscv);
-            break;
-        }
-        
-        case OP_JAL: {
-            handle_jal(riscv);
-            break;
-        }
-
-        case OP_JALR: {
-            handle_jalr(riscv);
-            break;
-        }
-
-        case OP_BEQ: {
-            switch (riscv->instr.r.funct3)
-            {
-            case FUNC3_BEQ:
-                handle_beq(riscv);
-                break;
-            case FUNC3_BNE:
-                handle_bne(riscv);
-                break;
-            case FUNC3_BLT:
-                handle_blt(riscv);
-                break;
-            case FUNC3_BGE:
-                handle_bge(riscv);
-                break;
-            case FUNC3_BLTU:
-                handle_bltu(riscv);
-                break;
-            case FUNC3_BGEU:
-                handle_bgeu(riscv);
-                break;
-            default:
-                goto cond_end;
-            }
-            break;
-        }
-        
-        default:
-            goto cond_end;
-        }
-    } while (forever);
-    return;
-
-cond_end:
-    fprintf(stderr, "Unable to recognize %x\n", riscv->instr.raw);
-}
-
-// 遍历外设链表 根据地址找到对应设备
-riscv_device_t* device_find(riscv_t* riscv, riscv_word_t addr) {
-    // 在有 device_buffer 的情况下仍然没有找到 必须进行查找
-    riscv_device_t* dev = riscv->device_list;
-    while (dev) {
-        if (addr >= dev->addr_start && addr < dev->addr_end) {
-            return dev;
-        }
-        dev = dev->next;
+        curr = curr->next;
     }
     return NULL;
 }
 
-// 从模拟器的角度找到读写区域对应的设备 根据设备的特性去调用读写函数
-int riscv_mem_read(riscv_t* riscv, riscv_word_t start_addr, uint8_t* val, int width) {
-    // 利用读缓存设备优化
-    if (start_addr >= riscv->dev_read_buffer->addr_start && start_addr < riscv->dev_read_buffer->addr_end) {
-        return riscv->dev_read_buffer->read(riscv->dev_read_buffer, start_addr, val, width);
+int riscv_mem_write(riscv_t * riscv, riscv_word_t addr, uint8_t * val, int width) {
+    if ((addr >= riscv->dev_write->base) && (addr < riscv->dev_write->end)) {
+        return riscv->dev_write->write(riscv->dev_write, addr, val, width);
     }
 
-    riscv_device_t* targetDevice = device_find(riscv, start_addr);
-    
-    if (targetDevice == NULL) {
-        fprintf(stderr, "invaild read address\n");
+    device_t * device = riscv_find_device(riscv, addr);
+    if (device == NULL) {
+        fprintf(stderr, "write to invalid address %x\n", addr);
         return -1;
     }
-    riscv->dev_read_buffer = targetDevice;
-    // 注意 val 传入的是地址 因为你不知道用户要读取几个字节 所以以 1B 为单位 从首地址开始处理
-    return targetDevice->read(targetDevice, start_addr, val, width);
+
+    riscv->dev_write = device;
+    return device->write(device, addr,val, width);
 }
 
-int riscv_mem_write(riscv_t* riscv, riscv_word_t start_addr, uint8_t* val, int width) {
-    // 利用写缓存设备优化
-    if (start_addr >= riscv->dev_write_buffer->addr_start && start_addr < riscv->dev_write_buffer->addr_end) {
-        return riscv->dev_write_buffer->write(riscv->dev_write_buffer, start_addr, val, width);
+int riscv_mem_read(riscv_t * riscv, riscv_word_t addr, uint8_t * val, int width) {
+    if ((addr >= riscv->dev_read->base) && (addr < riscv->dev_read->end)) {
+        return riscv->dev_read->read(riscv->dev_read, addr, val, width);
     }
-    riscv_device_t* targetDevice = device_find(riscv, start_addr);
-    
-    if (targetDevice == NULL) {
-        fprintf(stderr, "current instr: %x\n", riscv->instr.raw);
-        fprintf(stderr, "invaild write address\n");
+
+    device_t * device = riscv_find_device(riscv, addr);
+    if (device == NULL) {
+        fprintf(stderr, "read from invalid address %x\n", addr);
         return -1;
     }
-    
-    riscv->dev_write_buffer = targetDevice;
-    return targetDevice->write(targetDevice, start_addr, val, width);
+
+    riscv->dev_read = device;
+    return device->read(device, addr, val, width);
 }
 
-// 模拟器运行主体
-void riscv_run(riscv_t* riscv) {
-    // 参考 instr_test 的执行流程
-    
-    // 复位内核
+void riscv_csr_init (riscv_t * riscv) {
+}
+
+/**
+ * 写CSR寄存器
+*/
+void riscv_write_csr(riscv_t * riscv, riscv_word_t csr, riscv_word_t val) {
+    riscv->csr_regs.mscratch = val;
+}
+
+/**
+ * 读CSR寄存器
+*/
+riscv_word_t riscv_read_csr(riscv_t * riscv, riscv_word_t csr) {
+    return riscv->csr_regs.mscratch;
+}
+
+int riscv_add_breakpoint (riscv_t * riscv, riscv_word_t addr) {
+    breakpoint_t * breakpoint = (breakpoint_t *)calloc(1, sizeof(breakpoint_t));
+    if (breakpoint == NULL) {
+        return -1;
+    }
+
+    breakpoint->addr = addr;
+    breakpoint->next = riscv->breaklist;
+    riscv->breaklist = breakpoint;
+    return 0;
+}
+
+void riscv_remove_breakpoint (riscv_t * riscv, riscv_word_t addr) {
+    breakpoint_t * curr = riscv->breaklist;
+    breakpoint_t * pre = NULL;
+    while (curr) {
+        if (curr->addr == addr) {
+            if (pre == NULL) {
+                riscv->breaklist = curr->next;
+            } else {
+                pre->next = curr->next;
+            }
+            free(curr);
+            return;
+        }
+
+        pre = curr;
+        curr = curr->next;
+    }
+}
+
+/**
+ * 复位内核
+ */
+void riscv_reset(riscv_t* riscv) {
+    riscv->pc = 0;
+    riscv->instr.raw = 0;
+    riscv->dev_read = riscv->dev_write = riscv->dev_list;
+
+    // 存储器不清空，只清空寄存器
+    memset(riscv->regs, 0, sizeof(riscv->regs));
+    riscv_csr_init(riscv);
+// 测试用
+#if 0
+    for (int i = 0; i < 32; i++) {
+        riscv->regs[i] = i;
+    }
+#endif
+}
+
+#define i_get_imm(instr)   \
+    ((int32_t)(instr.i.imm11_0 | ((instr.i.imm11_0 & (1 << 11)) ? (0xFFFFF << 12) : 0)))
+
+#define b_get_imm(instr) \
+    ((int32_t)(((instr.b.imm_4_1 << 1) | (instr.b.imm_10_5 << 5) | (instr.b.imm_11 << 11) | \
+    (instr.b.imm_12 ? (0xFFFFF << 12) : 0))))
+
+#define j_get_imm(instr)    \
+    ((int32_t)((instr.j.imm_10_1 << 1) | (instr.j.imm_11 << 11) | (instr.j.imm_19_12 << 12) | \
+    ((instr.j.imm_20) ? (0xFFF << 20) : 0)))
+
+#define u_get_imm(instr)   (instr.raw & 0xFFFFF000)
+
+#define s_get_imm(instr)    \
+    ((int32_t)((instr.s.imm4_0 << 0) | (instr.s.imm11_5 << 5) | ((instr.s.imm11_5 & (1 << 6) ) ? (0xFFFFFFFF << 11) : 0)))
+#define s_extend_64(val)  (int64_t)((val & (1 << 31)) ? (val | 0xFFFFFFFF00000000) : val)
+
+void riscv_continue(riscv_t * riscv, int forever) {
+    do {
+        riscv_word_t pc = riscv->pc;
+
+        // 读取指令
+        riscv_word_t * mem = (riscv_word_t *)riscv->flash->mem;
+        if ((pc >= riscv->flash->device.end) || (pc < riscv->flash->device.base)) {
+            goto cont_end;
+        }
+
+        // 指令单步执行
+        riscv->instr.raw = mem[(riscv->pc - riscv->flash->device.base) >> 2];
+        switch (riscv->instr.opcode) {
+            case OP_BREAK: {
+                switch (riscv->instr.i.funct3) {
+                    case FUNC3_CSRRW: {
+                        riscv_word_t csr = riscv->instr.i.imm11_0;
+                        riscv_word_t old = riscv_read_csr(riscv, csr);
+                        riscv_word_t new = riscv_read_reg(riscv, riscv->instr.i.rs1);
+                        riscv_write_reg(riscv, riscv->instr.i.rd, old);
+                        riscv_write_csr(riscv, csr, new);
+                        riscv->pc += sizeof(riscv_word_t);
+                        break;
+                    }
+                    case FUNC3_CSRRS: {
+                        riscv_word_t csr = riscv->instr.i.imm11_0;
+                        riscv_word_t old = riscv_read_csr(riscv, csr);
+                        riscv_word_t imm = riscv_read_reg(riscv, riscv->instr.i.rs1);
+                        riscv_write_reg(riscv, riscv->instr.i.rd, old);
+                        riscv_write_csr(riscv, csr, old | imm);
+                        riscv->pc += sizeof(riscv_word_t);
+                        break;
+                    }
+                    case FUNC3_CSRRC: {
+                        riscv_word_t csr = riscv->instr.i.imm11_0;
+                        riscv_word_t old = riscv_read_csr(riscv, csr);
+                        riscv_word_t imm = riscv_read_reg(riscv, riscv->instr.i.rs1);
+                        riscv_write_reg(riscv, riscv->instr.i.rd, old);
+                        riscv_write_csr(riscv, csr, old & ~imm);
+                        riscv->pc += sizeof(riscv_word_t);
+                        break;
+                    }
+                    case FUNC3_CSRRWI: {
+                        riscv_word_t csr = riscv->instr.i.imm11_0;
+                        riscv_word_t old = riscv_read_csr(riscv, csr);
+                        riscv_write_reg(riscv, riscv->instr.i.rd, old);
+                        riscv_write_csr(riscv, csr, riscv->instr.i.rs1);
+                        riscv->pc += sizeof(riscv_word_t);
+                        break;
+                    }
+                    case FUNC3_CSRRSI: {
+                        riscv_word_t csr = riscv->instr.i.imm11_0;
+                        riscv_word_t old = riscv_read_csr(riscv, csr);
+                        riscv_write_reg(riscv, riscv->instr.i.rd, old);
+                        riscv_write_csr(riscv, csr, old | riscv->instr.i.rs1);
+                        riscv->pc += sizeof(riscv_word_t);
+                        break;
+                    }
+                    case FUNC3_CSRRCI: {
+                        riscv_word_t csr = riscv->instr.i.imm11_0;
+                        riscv_word_t old = riscv_read_csr(riscv, csr);
+                        riscv_write_reg(riscv, riscv->instr.i.rd, old);
+                        riscv_write_csr(riscv, csr, old & ~riscv->instr.i.rs1);
+                        riscv->pc += sizeof(riscv_word_t);
+                        break;
+                    }
+                    default:
+                        goto cont_end;
+                }
+                break;
+            }
+            case OP_LUI: {
+                riscv_write_reg(riscv, riscv->instr.u.rd, u_get_imm(riscv->instr));
+                riscv->pc += sizeof(instr_t);
+                break;
+            }
+            case OP_AUIPC: {
+                riscv_write_reg(riscv, riscv->instr.u.rd, riscv->pc + u_get_imm(riscv->instr));
+                riscv->pc += sizeof(instr_t);
+                break;
+            }
+            case OP_JAL: {
+                int32_t imm  = j_get_imm(riscv->instr);
+                riscv_write_reg(riscv, riscv->instr.u.rd, riscv->pc + 4);
+                riscv->pc = (riscv_word_t)(riscv->pc + imm);
+                break;
+            }
+            case OP_JALR: {
+                riscv_word_t ret =riscv->pc;
+                int32_t jump_addr = (int32_t)riscv_read_reg(riscv, riscv->instr.i.rs1) + i_get_imm(riscv->instr);
+                riscv->pc = (riscv_word_t)jump_addr;
+                riscv_write_reg(riscv, riscv->instr.i.rd,  ret + 4);
+                break;
+            }
+            case OP_ADDI: {
+                switch (riscv->instr.i.funct3) {
+                    case FUNC3_ADDI: {
+                        int32_t imm = (int32_t)(i_get_imm(riscv->instr)) + (int32_t)(riscv_read_reg(riscv, riscv->instr.i.rs1));;
+                        riscv_write_reg(riscv, riscv->instr.i.rd, imm);
+                        riscv->pc += sizeof(instr_t);
+                        break;
+                    }
+                    case FUNC3_SLTI: {
+                        riscv_word_t rs1 = riscv_read_reg(riscv, riscv->instr.i.rs1);
+                        int32_t imm = i_get_imm(riscv->instr);
+                        riscv_write_reg(riscv, riscv->instr.i.rd, (int32_t)rs1 < imm);
+                        riscv->pc += sizeof(instr_t);
+                        break;
+                    }
+                    case FUNC3_SLTIU: {
+                        riscv_word_t rs1 = riscv_read_reg(riscv, riscv->instr.i.rs1);
+                        riscv_word_t imm = i_get_imm(riscv->instr);  // 有符号扩展
+                        riscv_write_reg(riscv, riscv->instr.i.rd, rs1 < imm);
+                        riscv->pc += sizeof(instr_t);
+                        break;
+                    }
+                    case FUNC3_XORI: {
+                         riscv_word_t rs1 = riscv_read_reg(riscv, riscv->instr.i.rs1);
+                         int32_t imm = i_get_imm(riscv->instr);
+                         riscv_write_reg(riscv, riscv->instr.i.rd, imm ^ rs1);
+                         riscv->pc += sizeof(instr_t);
+                         break;
+                    }
+                    case FUNC3_ORI: {
+                        riscv_word_t rs1 = riscv_read_reg(riscv, riscv->instr.i.rs1);
+                        int32_t imm = i_get_imm(riscv->instr);
+                        riscv_write_reg(riscv, riscv->instr.i.rd, imm | rs1);
+                        riscv->pc += sizeof(instr_t);
+                        break;
+                    }
+                    case FUNC3_ANDI: {
+                        riscv_word_t rs1 = riscv_read_reg(riscv, riscv->instr.i.rs1);
+                        int32_t imm = i_get_imm(riscv->instr);
+                        riscv_write_reg(riscv, riscv->instr.i.rd, imm & rs1);
+                        riscv->pc += sizeof(instr_t);
+                        break;
+                    }
+                    case FUNC3_SLLI: {
+                        riscv_word_t rs1 = riscv_read_reg(riscv, riscv->instr.i.rs1);
+                        riscv_word_t imm = riscv->instr.i.imm11_0 & 0x001F;
+                        riscv_write_reg(riscv, riscv->instr.i.rd, rs1 << imm);
+                        riscv->pc += sizeof(instr_t);
+                        break;
+                    }
+                    case FUNC3_SR: {
+                        if (riscv->instr.raw & (1 << 30)) {
+                            // srai
+                            riscv_word_t rs1 = riscv_read_reg(riscv, riscv->instr.i.rs1);
+                            riscv_word_t imm = riscv->instr.i.imm11_0 & 0x001F;
+                            riscv_write_reg(riscv, riscv->instr.i.rd, (int32_t)rs1 >> imm);
+                            riscv->pc += sizeof(instr_t);
+                        } else {
+                            // srli
+                            riscv_word_t rs1 = riscv_read_reg(riscv, riscv->instr.i.rs1);
+                            riscv_word_t imm = riscv->instr.i.imm11_0 & 0x001F;
+                            riscv_write_reg(riscv, riscv->instr.i.rd, (riscv_word_t)rs1 >> imm);
+                            riscv->pc += sizeof(instr_t);
+                        }
+                       break;
+                    }
+                    default:
+                        goto cont_end;
+                }
+                break;
+            }
+            case OP_ADD: {
+                switch (riscv->instr.r.funct3) {
+                    case FUNC3_ADD: {
+                        switch (riscv->instr.r.funct7) {
+                            case FUNC7_ADD: {
+                                int32_t result = (int32_t)riscv_read_reg(riscv, riscv->instr.r.rs1) + (int32_t)riscv_read_reg(riscv, riscv->instr.r.rs2);
+                                riscv_write_reg(riscv, riscv->instr.r.rd, result);
+                                riscv->pc += sizeof(instr_t);
+                                break;
+                            }
+                            case FUNC7_SUB: {
+                                int32_t result = (int32_t)riscv_read_reg(riscv, riscv->instr.r.rs1) - (int32_t)riscv_read_reg(riscv, riscv->instr.r.rs2);
+                                riscv_write_reg(riscv, riscv->instr.r.rd, result);
+                                riscv->pc += sizeof(instr_t);
+                                break;
+                            }
+                            case FUNC7_MUL: {
+                                riscv_word_t result = riscv_read_reg(riscv, riscv->instr.r.rs1) * riscv_read_reg(riscv, riscv->instr.r.rs2);
+                                riscv_write_reg(riscv, riscv->instr.r.rd, result);
+                                riscv->pc += sizeof(instr_t);
+                                break;
+                            }
+                            default:
+                                goto cont_end;
+                        }
+                        break;
+                    }
+                    case FUNC3_SLL: {
+                        if (riscv->instr.r.funct7 == FUNC7_MUL) {
+                            // MULH
+                            int64_t rs1 = s_extend_64(riscv_read_reg(riscv, riscv->instr.r.rs1));
+                            int64_t rs2 = s_extend_64(riscv_read_reg(riscv, riscv->instr.r.rs2));
+                            riscv_write_reg(riscv, riscv->instr.r.rd, (rs1 * rs2) >> 32);
+                            riscv->pc += sizeof(instr_t);
+                        } else {
+                            // SLL
+                            riscv_word_t result = riscv_read_reg(riscv, riscv->instr.r.rs1) << riscv_read_reg(riscv, riscv->instr.r.rs2);
+                            riscv_write_reg(riscv, riscv->instr.r.rd, result);
+                            riscv->pc += sizeof(instr_t);
+                            break;
+                        }
+                        break;
+                    }
+                    case FUNC3_SLT: {
+                        if (riscv->instr.r.funct7 == FUNC7_MUL) {
+                            // mulhsu
+                            int64_t rs1 = s_extend_64(riscv_read_reg(riscv, riscv->instr.r.rs1));
+                            uint64_t rs2 = riscv_read_reg(riscv, riscv->instr.r.rs2);
+                            riscv_write_reg(riscv, riscv->instr.r.rd, (rs1 * rs2) >> 32);
+                            riscv->pc += sizeof(instr_t);
+                        } else {                        // slt
+                            int result = (int32_t)riscv_read_reg(riscv, riscv->instr.r.rs1) < (int32_t)riscv_read_reg(riscv, riscv->instr.r.rs2);
+                            riscv_write_reg(riscv, riscv->instr.r.rd, result);
+                            riscv->pc += sizeof(instr_t);
+                        }
+                        break;
+                    }
+                    case FUNC3_SLTU: {
+                        if (riscv->instr.r.funct7 == FUNC7_MUL) {
+                            // mulhu
+                            uint64_t result = (uint64_t)riscv_read_reg(riscv, riscv->instr.r.rs1) * (uint64_t)riscv_read_reg(riscv, riscv->instr.r.rs2);
+                            riscv_write_reg(riscv, riscv->instr.r.rd, result >> 32);
+                            riscv->pc += sizeof(instr_t);
+                        } else {                        // sltu
+                            int result = riscv_read_reg(riscv, riscv->instr.r.rs1) < riscv_read_reg(riscv, riscv->instr.r.rs2);
+                            riscv_write_reg(riscv, riscv->instr.r.rd, result);
+                            riscv->pc += sizeof(instr_t);
+                        }
+                        break;
+                    }
+                    case FUNC3_XOR: {
+                        if (riscv->instr.r.funct7 == FUNC7_DIV) {
+                            // div
+                            int32_t result = (int32_t)riscv_read_reg(riscv, riscv->instr.r.rs1) / (int32_t)riscv_read_reg(riscv, riscv->instr.r.rs2);
+                            riscv_write_reg(riscv, riscv->instr.r.rd, result);
+                            riscv->pc += sizeof(instr_t);
+                        } else {                        // xor
+                            riscv_word_t result = riscv_read_reg(riscv, riscv->instr.r.rs1) ^ riscv_read_reg(riscv, riscv->instr.r.rs2);
+                            riscv_write_reg(riscv, riscv->instr.r.rd, result);
+                            riscv->pc += sizeof(instr_t);
+                        }
+                        break;
+                    }
+                    case FUNC3_SRL: {
+                        switch (riscv->instr.r.funct7) {
+                            case FUNC7_SRL: {
+                                riscv_word_t result = riscv_read_reg(riscv, riscv->instr.r.rs1) >> riscv_read_reg(riscv, riscv->instr.r.rs2);
+                                riscv_write_reg(riscv, riscv->instr.r.rd, result);
+                                riscv->pc += sizeof(instr_t);
+                                break;
+                            }
+                            case FUNC7_SRA: {
+                                int32_t result = (int32_t)riscv_read_reg(riscv, riscv->instr.r.rs1) >> (int32_t)riscv_read_reg(riscv, riscv->instr.r.rs2);
+                                riscv_write_reg(riscv, riscv->instr.r.rd, result);
+                                riscv->pc += sizeof(instr_t);
+                                break;
+                            }
+                case FUNC7_DIV: {
+                    // divu
+                    riscv_word_t result = riscv_read_reg(riscv, riscv->instr.r.rs1) / riscv_read_reg(riscv, riscv->instr.r.rs2);
+                    riscv_write_reg(riscv, riscv->instr.r.rd, result);
+                    riscv->pc += sizeof(instr_t);
+                    break;
+                }                            default:
+                                goto cont_end;
+                        }
+                        break;
+                    }
+                    case FUNC3_OR: {
+                        if (riscv->instr.r.funct7 == FUNC7_REM) {
+                            // rem
+                            int32_t result = (int32_t)riscv_read_reg(riscv, riscv->instr.r.rs1) % (int32_t)riscv_read_reg(riscv, riscv->instr.r.rs2);
+                            riscv_write_reg(riscv, riscv->instr.r.rd, result);
+                            riscv->pc += sizeof(instr_t);
+                        } else {                        // or
+                            riscv_word_t result = riscv_read_reg(riscv, riscv->instr.r.rs1) | riscv_read_reg(riscv, riscv->instr.r.rs2);
+                            riscv_write_reg(riscv, riscv->instr.r.rd, result);
+                            riscv->pc += sizeof(instr_t);
+                        }
+                        break;
+                    }
+                    case FUNC3_AND: {
+                        if (riscv->instr.r.funct7 == FUNC7_REM) {
+                            // remu
+                            riscv_word_t result = riscv_read_reg(riscv, riscv->instr.r.rs1) % riscv_read_reg(riscv, riscv->instr.r.rs2);
+                            riscv_write_reg(riscv, riscv->instr.r.rd, result);
+                            riscv->pc += sizeof(instr_t);
+                        } else {                        // and
+                            riscv_word_t result = riscv_read_reg(riscv, riscv->instr.r.rs1) & riscv_read_reg(riscv, riscv->instr.r.rs2);
+                            riscv_write_reg(riscv, riscv->instr.r.rd, result);
+                            riscv->pc += sizeof(instr_t);
+                        }
+                        break;
+                    }
+                    default:
+                        goto cont_end;
+                }
+                break;
+            }
+            case OP_BEQ: {
+                switch (riscv->instr.b.funct3) {
+                    case FUNC3_BEQ: {
+                        if(riscv_read_reg(riscv, riscv->instr.b.rs1) == riscv_read_reg(riscv, riscv->instr.b.rs2)) {
+                            riscv->pc = (int32_t)pc + b_get_imm(riscv->instr);
+                        } else {
+                            riscv->pc += sizeof(instr_t);
+                        }
+                        break;
+                    }
+                    case FUNC3_BNE: {
+                        if(riscv_read_reg(riscv, riscv->instr.b.rs1) != riscv_read_reg(riscv, riscv->instr.b.rs2)) {
+                            riscv->pc = (int32_t)pc + b_get_imm(riscv->instr);
+                        } else {
+                            riscv->pc += sizeof(instr_t);
+                        }
+                        break;
+                    }
+                    case FUNC3_BLT: {
+                        if((int32_t)riscv_read_reg(riscv, riscv->instr.b.rs1) < (int32_t)riscv_read_reg(riscv, riscv->instr.b.rs2)) {
+                            riscv->pc = (int32_t)pc + b_get_imm(riscv->instr);
+                        } else {
+                            riscv->pc += sizeof(instr_t);
+                        }
+                        break;
+                    }
+                    case FUNC3_BGE: {
+                        if((int32_t)riscv_read_reg(riscv, riscv->instr.b.rs1) >= (int32_t)(riscv_read_reg(riscv, riscv->instr.b.rs2))) {
+                            riscv->pc = (int32_t)riscv->pc + b_get_imm(riscv->instr);
+                        } else{
+                            riscv->pc += sizeof(riscv_word_t);
+                        }
+                        break;
+                    }
+                    case FUNC3_BLTU: {
+                        if(riscv_read_reg(riscv, riscv->instr.b.rs1) < riscv_read_reg(riscv, riscv->instr.b.rs2)) {
+                            riscv->pc = (int32_t)pc + b_get_imm(riscv->instr);
+                        } else {
+                            riscv->pc += sizeof(instr_t);
+                        }
+                        break;
+                    }
+                    case FUNC3_BGEU: {
+                        if(riscv_read_reg(riscv, riscv->instr.b.rs1) >= riscv_read_reg(riscv, riscv->instr.b.rs2)) {
+                            riscv->pc = (int32_t)riscv->pc + b_get_imm(riscv->instr);
+                        } else{
+                            riscv->pc += sizeof(riscv_word_t);
+                        }
+                        break;
+                    }
+                    default:
+                        goto cont_end;
+                }
+                break;
+            }
+            case OP_SB: {
+                switch (riscv->instr.i.funct3) {
+                    case FUNC3_SB: {
+                        riscv_word_t addr = riscv_read_reg(riscv, riscv->instr.s.rs1) + s_get_imm(riscv->instr);
+                        riscv_word_t val = riscv_read_reg(riscv, riscv->instr.s.rs2);
+                        int rc = riscv_mem_write(riscv, addr, (uint8_t *)&val, 1);
+                        riscv->pc += sizeof(riscv_word_t);
+                        break;
+                    }
+                    case FUNC3_SH:{
+                        riscv_word_t addr = riscv->regs[riscv->instr.s.rs1] + s_get_imm(riscv->instr);
+                        riscv_word_t val = riscv_read_reg(riscv, riscv->instr.s.rs2);
+                        int rc = riscv_mem_write(riscv, addr, (uint8_t *)&val, 2);
+                        riscv->pc += sizeof(riscv_word_t);
+                        break;
+                    }
+                    case FUNC3_SW: {
+                        riscv_word_t addr = riscv->regs[riscv->instr.s.rs1] + s_get_imm(riscv->instr);
+                        riscv_word_t val = riscv_read_reg(riscv, riscv->instr.s.rs2);
+                        int rc = riscv_mem_write(riscv, addr, (uint8_t *)&val, 4);
+                        riscv->pc += sizeof(riscv_word_t);
+                        break;
+                    }
+                    default:
+                        goto cont_end;
+                }
+                break;
+            }
+            case OP_LB: {
+                switch (riscv->instr.i.funct3) {
+                    case FUNC3_LB: {
+                        riscv_word_t addr = riscv_read_reg(riscv, riscv->instr.i.rs1) + i_get_imm(riscv->instr);
+                        riscv_word_t val = 0;
+                        int rc = riscv_mem_read(riscv, addr, (uint8_t *)&val, 1);
+                        riscv_write_reg(riscv, riscv->instr.i.rd, (val & (1 << 7)) ? (val | 0xFFFFFF00) : val);
+                        riscv->pc += sizeof(riscv_word_t);
+                        break;
+                    }
+                    case FUNC3_LH: {
+                        riscv_word_t addr = riscv_read_reg(riscv, riscv->instr.i.rs1) + i_get_imm(riscv->instr);
+                        riscv_word_t val = 0;
+                        int rc = riscv_mem_read(riscv, addr, (uint8_t *)&val, 2);
+                        riscv_write_reg(riscv, riscv->instr.i.rd, (val & (1 << 15)) ? (val | 0xFFFF0000) : val);
+                        riscv->pc += sizeof(riscv_word_t);
+                        break;
+                    }
+                    case FUNC3_LW: {
+                        riscv_word_t addr = riscv_read_reg(riscv, riscv->instr.i.rs1) + i_get_imm(riscv->instr);
+                        riscv_word_t val = 0;
+                        int rc = riscv_mem_read(riscv, addr, (uint8_t *)&val, 4);
+                        riscv_write_reg(riscv, riscv->instr.i.rd, val);
+                        riscv->pc += sizeof(riscv_word_t);
+                        break;
+                    }
+                    case FUNC3_LBU: {
+                        riscv_word_t addr = riscv_read_reg(riscv, riscv->instr.i.rs1) + i_get_imm(riscv->instr);
+                        riscv_word_t val = 0;
+                        int rc = riscv_mem_read(riscv, addr, (uint8_t *)&val, 1);
+                        riscv_write_reg(riscv, riscv->instr.i.rd, val);
+                        riscv->pc += sizeof(riscv_word_t);
+                        break;
+                    }
+                    case FUNC3_LHU: {
+                        riscv_word_t addr = riscv_read_reg(riscv, riscv->instr.i.rs1) + i_get_imm(riscv->instr);
+                        riscv_word_t val = 0;
+                        int rc = riscv_mem_read(riscv, addr, (uint8_t *)&val, 2);
+                        riscv_write_reg(riscv, riscv->instr.i.rd, val);
+                        riscv->pc += sizeof(riscv_word_t);
+                        break;
+                    }
+                    default:
+                        goto cont_end;
+                }
+                break;
+            }
+            default:
+                goto cont_end;
+        }
+
+        // 断点的处理
+        if (forever) {
+            breakpoint_t * curr = riscv->breaklist;
+            while (curr) {
+                if (curr->addr == riscv->pc) {
+                    goto cont_end;
+                }
+                curr = curr->next;
+            }
+
+            // 检查是否有停止请求
+            char c = EOF;
+            recv(riscv->server->client, &c, 1, 0);
+            if (c == 3) {
+                break;
+            }
+        }
+
+    } while (forever);
+
+cont_end:
+    return;
+}
+
+/**
+ * 启动RISC-V内核运行
+*/
+void riscv_run (riscv_t * riscv) {
     riscv_reset(riscv);
 
-    if (riscv->gdb_server) {
-        gdb_server_run(riscv->gdb_server);
-    }
-    else {
+    if (riscv->server) {
+        gdb_server_run(riscv->server);
+    } else {
         riscv_continue(riscv, 1);
     }
+}
+
+void riscv_load_bin (riscv_t * riscv, const char * file_name) {
+    FILE * file = fopen(file_name, "rb");
+    if (file == NULL) {
+        fprintf(stderr, "open file %s failed.\n", file_name);
+        exit(-1);
+    }
+
+    if (feof(file)) {
+        fprintf(stderr, "file %s is empty.\n", file_name);
+        exit(-1);
+    }
+
+    char buf[1024];
+    char * dest = riscv->flash->mem;
+    size_t size;
+    while ((size = fread(buf, 1, sizeof(buf), file)) > 0) {
+        memcpy(dest, buf, size);
+        dest += size;
+    }
+
+    fclose(file);
 }

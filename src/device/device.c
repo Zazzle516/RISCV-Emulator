@@ -1,10 +1,13 @@
-#include "device.h"
+﻿#include "device.h"
+#include <string.h>
 
-void device_init(riscv_device_t* myDev, const char* name, riscv_word_t attr, riscv_word_t start, riscv_word_t size){
-    // 这里因为所需要的字段碰巧都会被参数定义 所以省去了对这片空间的初始化步骤
-    // 只是初始化空间并不是分配空间, 正常来说需要清零的
-    myDev->name = name;
-    myDev->attr = attr;
-    myDev->addr_start = start;
-    myDev->addr_end = start + size;
+/**
+ * 初始化RISC-V设备对像
+*/
+void device_init(device_t * dev, const char * name, riscv_word_t attr, riscv_word_t base, riscv_word_t size) {
+    memset(dev, 0, sizeof(device_t));
+    dev->name = name;
+    dev->attr = attr;
+    dev->base = base;
+    dev->end = base + size;
 }
